@@ -420,7 +420,7 @@ impl<'a> Tokenizer<'a> {
                 let atom = self.read_atom(c);
                 if atom == "." {
                     Token::Dot
-                } else if parse_number(&atom, 10) == NumberSyntax::NotANumber {
+                } else if !may_be_number(&atom) || parse_number(&atom, 10) == NumberSyntax::NotANumber {
                     Token::Symbol(self.fold(atom))
                 } else {
                     Token::Number(atom)
@@ -428,6 +428,17 @@ impl<'a> Tokenizer<'a> {
             }
         };
         Some(token)
+    }
+}
+
+/// Whether an atom (never starting with `#`) could be a number: one starts
+/// with a digit, or with a sign or a point and goes on (`-5`, `.5`,
+/// `+inf.0`). The rest, most symbols, skip the number parser.
+fn may_be_number(atom: &str) -> bool {
+    match atom.as_bytes() {
+        [c, ..] if c.is_ascii_digit() => true,
+        [b'+' | b'-' | b'.', _, ..] => true,
+        _ => false,
     }
 }
 
@@ -679,6 +690,9 @@ mod tests {
             ]
         );
         assert_eq!(tokens("[a b]"), vec![Token::LeftBracket, sym("a"), sym("b"), Token::RightBracket]);
+        // Numbers start with a digit, or a sign or point and more.
+        let n = |s: &str| Token::Number(s.to_string());
+        assert_eq!(tokens("-5 +inf.0 1e3 define -a +.x"), vec![n("-5"), n("+inf.0"), n("1e3"), sym("define"), sym("-a"), sym("+.x")]);
     }
 
     #[test]
