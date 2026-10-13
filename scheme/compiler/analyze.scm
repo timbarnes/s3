@@ -12,7 +12,19 @@
 ;; anywhere inside (nested lambdas included) and bound nowhere inside.
 ;; Assigning a variable counts as a reference: a captured, assigned
 ;; variable's box must be copied.
-(define (free-variables l)
+;;
+;; `memo` is a one-element vector holding ((lambda . free) ...) for the
+;; lambdas of one form, so each is walked once. A nested lambda counts as
+;; its free variables, in their order: the same result as walking into it,
+;; since variable numbers are unique within the form, so its own
+;; variables are referenced nowhere else.
+(define (free-variables l memo)
+  (cond ((assq l (vector-ref memo 0)) => cdr)
+        (else (let ((free (walk-free-variables l memo)))
+                (vector-set! memo 0 (cons (cons l free) (vector-ref memo 0)))
+                free))))
+
+(define (walk-free-variables l memo)
   (let ((bound (map var-id (lambda-vars l)))
         (refs '()))
     (define (bind! v) (set! bound (cons (var-id v) bound)))
@@ -25,7 +37,7 @@
         ((global-define global-set) (walk (global-value e)))
         ((if) (walk (if-test e)) (walk (if-then e)) (walk (if-else e)))
         ((seq) (for-each walk (seq-body e)))
-        ((lambda) (for-each bind! (lambda-vars e)) (walk (lambda-body e)))
+        ((lambda) (for-each ref! (free-variables e memo)))
         ((call) (walk (call-fn e)) (for-each walk (call-args e)))
         ((let)
          (for-each (lambda (b) (bind! (binding-var b)) (walk (binding-init b))) (let-bindings e))

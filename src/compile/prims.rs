@@ -126,7 +126,7 @@ pub static PRIMITIVES: &[Primitive] = &[
     }),
     prim("%cell-bound?", 1, Some(1), |_, a| Ok(Value::bool(!cell_value(cell_arg(a[0], "%cell-bound?")?).get().is_undefined()))),
     // Macros: a parsed syntax-rules, as data.
-    // (%make-macro ellipsis-or-#f (literal ...) ((pattern . template) ...) depth env)
+    // (%make-macro ellipsis-or-#f (literal ...) ((matcher . template) ...) depth env)
     prim("%make-macro", 5, Some(5), |h, a| {
         let who = "%make-macro";
         let ellipsis = if a[0].is_true() { Some(id_arg(a[0], who)?) } else { None };
@@ -135,13 +135,13 @@ pub static PRIMITIVES: &[Primitive] = &[
             .into_iter()
             .map(|r| match kind(r) {
                 Some(Obj::Pair { car, cdr }) => Ok((car.get(), cdr.get())),
-                _ => Err(expected(who, "a (pattern . template) pair", r)),
+                _ => Err(expected(who, "a (matcher . template) pair", r)),
             })
             .collect::<Result<_, _>>()?;
         let depth = a[3].as_fixnum().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| expected(who, "a depth", a[3]))?;
         Ok(Value::obj(h.make_macro(SyntaxRules { ellipsis, literals, rules, depth, env: env_arg(a[4], who)? })))
     }),
-    // #(ellipsis-or-#f (literal ...) ((pattern . template) ...) depth env)
+    // #(ellipsis-or-#f (literal ...) ((matcher . template) ...) depth env)
     prim("%macro-parts", 1, Some(1), |h, a| {
         let Some(Obj::Macro(m)) = kind(a[0]) else { return Err(expected("%macro-parts", "a macro", a[0])) };
         let ellipsis = m.ellipsis.map(Value::obj).unwrap_or(Value::FALSE);

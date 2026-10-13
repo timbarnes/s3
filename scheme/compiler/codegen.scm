@@ -14,12 +14,17 @@
 ;;; target 0 and patched when the target is known.
 
 (define-record-type gen
-  (make-gen boxed code consts depth locs names local-names free-names self-var next-self params)
+  (make-gen boxed frees code consts const-index depth locs names local-names free-names self-var next-self params)
   gen?
+  ;; Shared by a form's procedures: its boxed variables, and the memo of
+  ;; its lambdas' free variables (free-variables).
   (boxed gen-boxed)
+  (frees gen-frees)
   ;; a buffer of instructions, and one of constants
   (code gen-code)
   (consts gen-consts)
+  ;; ((constant . index) ...), to find a constant already in the pool.
+  (const-index gen-const-index set-gen-const-index!)
   (depth gen-depth set-gen-depth!)
   ;; Where each variable lives: (id local . slot) or (id free . index).
   (locs gen-locs set-gen-locs!)
@@ -35,12 +40,12 @@
   (next-self gen-next-self set-gen-next-self!)
   (params gen-params set-gen-params!))
 
-(define (new-gen boxed)
-  (make-gen boxed (make-buffer) (make-buffer) 0 '() '() (make-buffer) (make-buffer) #f #f 0))
+(define (new-gen boxed frees)
+  (make-gen boxed frees (make-buffer) (make-buffer) '() 0 '() '() (make-buffer) (make-buffer) #f #f 0))
 
 ;; Compile a top-level form into a template of no arguments.
 (define (codegen e)
-  (let ((g (new-gen (boxed-variables e))))
+  (let ((g (new-gen (boxed-variables e) (vector '()))))
     (gen-expr g e #t)
     (finish g "top-level" 0 #f)))
 
@@ -62,7 +67,10 @@
 ;; The pool index of `v`, adding it if it isn't there. Constants are
 ;; shared by identity.
 (define (constant g v)
-  (or (buffer-index (gen-consts g) v eq?) (buffer-push! (gen-consts g) v)))
+  (cond ((assq v (gen-const-index g)) => cdr)
+        (else (let ((i (buffer-push! (gen-consts g) v)))
+                (set-gen-const-index! g (cons (cons v i) (gen-const-index g)))
+                i))))
 
 ;; Emit an instruction; its index.
 (define (emit g . instruction) (buffer-push! (gen-code g) instruction))
@@ -147,7 +155,7 @@
                   (loop (cdr body))))))
     ((lambda)
      (let ((self-var (gen-next-self g))
-           (free (free-variables e)))
+           (free (free-variables e (gen-frees g))))
        (set-gen-next-self! g #f)
        (for-each (lambda (id) (load-raw g id)) free)
        (let ((t (lambda-template g e free self-var)))
@@ -312,7 +320,7 @@
     (let loop ((bs bindings) (i 0))
       (if (pair? bs)
           (let ((var (binding-var (car bs))))
-            (let free ((fvs (free-variables (binding-init (car bs)))) (j 0))
+            (let free ((fvs (free-variables (binding-init (car bs)) (gen-frees g))) (j 0))
               (if (pair? fvs)
                   (let ((k (index-of (car fvs) ids)))
                     (if (and k (>= k i))
@@ -332,7 +340,7 @@
 ;; Compile an inner lambda into its own template. Its free variables,
 ;; `free`, are free-ref 0, free-ref 1, ... inside it.
 (define (lambda-template g l free self-var)
-  (let ((inner (new-gen (gen-boxed g)))
+  (let ((inner (new-gen (gen-boxed g) (gen-frees g)))
         (vars (lambda-vars l)))
     (set-gen-self-var! inner (and (not (lambda-rest l)) self-var))
     (set-gen-params! inner (length (lambda-params l)))

@@ -99,11 +99,4 @@
         (begin (buffer-push! b fill) (loop))))
   (vector-set! (buffer-items b) i x))
 
-;; The index of the first element `same?` to `x`, or #f.
-(define (buffer-index b x same?)
-  (let loop ((i 0))
-    (cond ((= i (buffer-count b)) #f)
-          ((same? (buffer-ref b i) x) i)
-          (else (loop (+ i 1))))))
-
 (define (buffer->vector b) (vector-copy (buffer-items b) 0 (buffer-count b)))

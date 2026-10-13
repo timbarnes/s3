@@ -448,7 +448,7 @@ impl Vm {
             let op = t.code[ip];
             ip += 1;
             #[cfg(feature = "stats")]
-            crate::vm::stats::record(op);
+            crate::vm::stats::record(op, t);
             match op {
                 Op::Const(k) => push!(t.consts[k as usize]),
                 Op::Fixnum(n) => push!(Value::fixnum(n as i64).unwrap()),

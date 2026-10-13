@@ -42,7 +42,7 @@
   transformer?
   (ellipsis transformer-ellipsis)
   (literals transformer-literals)
-  ;; ((pattern . template) ...)
+  ;; ((matcher . template) ...), both compiled
   (rules transformer-rules)
   (depth transformer-depth)
   (env transformer-env))
@@ -61,15 +61,60 @@
        (not (literal? sr v))
        (if (transformer-ellipsis sr)
            (eq? v (transformer-ellipsis sr))
-           (string=? (id-name v) "..."))))
+           (eq? (strip v) '...))))
 
-(define (underscore? sr id) (and (not (literal? sr id)) (string=? (id-name id) "_")))
+(define (underscore? sr id) (and (not (literal? sr id)) (eq? (strip id) '_)))
 
 (define (any? ok? items)
   (and (pair? items) (or (ok? (car items)) (any? ok? (cdr items)))))
 
+;;; Patterns are analysed once, when the macro is defined: each rule's
+;;; pattern, without its keyword, is stored as a matcher, a tagged vector:
+;;;
+;;;   #(lit id)  #(any)  #(var id)  #(nil)  #(datum x)
+;;;   #(list (p ...) tail)          a list with no ellipsis; tail a matcher
+;;;   #(seq (p ...) rep (p ...) tail vars n-before n-after)
+;;;                                 a list with an ellipsis after rep (or #f
+;;;                                 for none); vars, rep's pattern variables
+;;;   #(vec seq)                    a vector, seq a seq matcher
+;;;
 ;;; Matching. Bindings are an association list from pattern variable to
 ;;; (one . form) or (many . (match ...)).
+
+(define (compile-pattern sr p)
+  (cond ((identifier? p)
+         (cond ((literal? sr p) (vector 'lit p))
+               ((underscore? sr p) (vector 'any))
+               (else (vector 'var p))))
+        ((pair? p)
+         (let ((parts (list-parts p)))
+           (if (any? (lambda (i) (ellipsis? sr i)) (car parts))
+               (compile-sequence sr (car parts) (cdr parts))
+               (vector 'list (map (lambda (i) (compile-pattern sr i)) (car parts))
+                       (compile-pattern sr (cdr parts))))))
+        ((vector? p) (vector 'vec (compile-sequence sr (vector->list p) '())))
+        ((null? p) (vector 'nil))
+        (else (vector 'datum p))))
+
+;; The element before the ellipsis takes as many inputs as leave enough
+;; for the patterns after it. (An ellipsis first is a parse error.)
+(define (compile-sequence sr items tail)
+  (let* ((at (index-where (lambda (i) (ellipsis? sr i)) items))
+         (before (if at (take items (- at 1)) items))
+         (repeated (and at (list-ref items (- at 1))))
+         (after (if at (list-tail items (+ at 1)) '()))
+         (compile-all (lambda (ps) (map (lambda (i) (compile-pattern sr i)) ps))))
+    (vector 'seq (compile-all before) (and repeated (compile-pattern sr repeated)) (compile-all after)
+            (compile-pattern sr tail) (if repeated (pattern-vars sr repeated) '())
+            (length before) (length after))))
+
+(define (take items n) (if (= n 0) '() (cons (car items) (take (cdr items) (- n 1)))))
+
+(define (index-where ok? items)
+  (let loop ((items items) (i 0))
+    (cond ((null? items) #f)
+          ((ok? (car items)) i)
+          (else (loop (cdr items) (+ i 1))))))
 
 ;; The first rule whose pattern matches the use `form`: (template .
 ;; bindings). `same?` says whether a literal (as the macro's definition
@@ -79,90 +124,66 @@
   (let loop ((rules (transformer-rules sr)))
     (if (null? rules)
         (fail (string-append "no syntax rule matches " (show form)))
-        (let ((pattern (car (car rules))))
-          (let ((binds (and (pair? pattern) (match-pattern sr (cdr pattern) (cdr form) same? '()))))
-            (if binds
-                (cons (cdr (car rules)) binds)
-                (loop (cdr rules))))))))
+        (let ((binds (match (car (car rules)) (cdr form) same? '())))
+          (if binds
+              (cons (cdr (car rules)) binds)
+              (loop (cdr rules)))))))
 
-;; The bindings extended by matching, or #f.
-(define (match-pattern sr pattern input same? binds)
-  (cond ((identifier? pattern)
-         (cond ((literal? sr pattern) (and (identifier? input) (same? pattern input) binds))
-               ((underscore? sr pattern) binds)
-               (else (cons (cons pattern (cons 'one input)) binds))))
-        ((pair? pattern)
-         (let ((parts (list-parts pattern)))
-           (if (any? (lambda (p) (ellipsis? sr p)) (car parts))
-               (let ((inputs (list-parts input)))
-                 (match-sequence sr (car parts) (cdr parts) (car inputs) (cdr inputs) same? binds))
-               (match-pairs sr pattern input same? binds))))
-        ((vector? pattern)
-         (and (vector? input)
-              (match-sequence sr (vector->list pattern) '() (vector->list input) '() same? binds)))
-        ((null? pattern) (and (null? input) binds))
-        (else (and (equal? pattern input) binds))))
+;; The bindings extended by matching the matcher `m` against `input`, or #f.
+(define (match m input same? binds)
+  (let ((tag (vector-ref m 0)))
+    (cond ((eq? tag 'var) (cons (cons (vector-ref m 1) (cons 'one input)) binds))
+          ((eq? tag 'list) (match-list (vector-ref m 1) (vector-ref m 2) input same? binds))
+          ((eq? tag 'nil) (and (null? input) binds))
+          ((eq? tag 'lit) (and (identifier? input) (same? (vector-ref m 1) input) binds))
+          ((eq? tag 'any) binds)
+          ((eq? tag 'seq)
+           (let ((inputs (list-parts input)))
+             (match-sequence m (car inputs) (cdr inputs) same? binds)))
+          ((eq? tag 'vec)
+           (and (vector? input) (match-sequence (vector-ref m 1) (vector->list input) '() same? binds)))
+          (else (and (equal? (vector-ref m 1) input) binds)))))
 
-;; A list pattern with no ellipsis, pair by pair; a dotted tail matches
-;; whatever input remains.
-(define (match-pairs sr pattern input same? binds)
-  (cond ((and (pair? pattern) (pair? input))
-         (let ((binds (match-pattern sr (car pattern) (car input) same? binds)))
-           (and binds (match-pairs sr (cdr pattern) (cdr input) same? binds))))
-        ((pair? pattern) #f)
-        ((null? pattern) (and (null? input) binds))
-        (else (match-pattern sr pattern input same? binds))))
+;; A list with no ellipsis, pair by pair; the tail matches whatever input
+;; remains.
+(define (match-list ms tail input same? binds)
+  (cond ((null? ms) (match tail input same? binds))
+        ((pair? input)
+         (let ((binds (match (car ms) (car input) same? binds)))
+           (and binds (match-list (cdr ms) tail (cdr input) same? binds))))
+        (else #f)))
 
-(define (take items n) (if (= n 0) '() (cons (car items) (take (cdr items) (- n 1)))))
-
-;; Match `pattern` against each input in turn, pairwise, from the start
-;; of both lists.
-(define (match-each sr patterns inputs same? binds)
+;; Match each matcher against the inputs in turn, from the start of both.
+(define (match-each ms inputs same? binds)
   (cond ((not binds) #f)
-        ((or (null? patterns) (null? inputs)) binds)
-        (else (match-each sr (cdr patterns) (cdr inputs) same?
-                          (match-pattern sr (car patterns) (car inputs) same? binds)))))
+        ((null? ms) binds)
+        (else (match-each (cdr ms) (cdr inputs) same? (match (car ms) (car inputs) same? binds)))))
 
-;; A list pattern containing an ellipsis, or any vector pattern: the
-;; element before the ellipsis takes as many inputs as leave enough for
-;; the patterns after it; a non-nil `tail` matches the input's final cdr.
-(define (match-sequence sr items tail inputs input-tail same? binds)
-  (let ((at (let loop ((items items) (i 0))
-              (cond ((null? items) #f)
-                    ((ellipsis? sr (car items)) i)
-                    (else (loop (cdr items) (+ i 1)))))))
-    (if (eqv? at 0)
-        #f
-        (let* ((before (if at (take items (- at 1)) items))
-               (repeated (and at (list-ref items (- at 1))))
-               (after (if at (list-tail items (+ at 1)) '()))
-               (n-before (length before))
-               (reps (if repeated
-                         (let ((n (- (length inputs) n-before (length after))))
-                           (and (>= n 0) n))
-                         (and (= (length inputs) n-before) 0))))
-          (and reps
-               (let ((binds (match-each sr before inputs same? binds)))
-                 (and binds
-                      (let ((binds
-                             (if repeated
-                                 (let collect ((ins (take (list-tail inputs n-before) reps)) (matches '()))
-                                   (if (pair? ins)
-                                       (let ((b (match-pattern sr repeated (car ins) same? '())))
-                                         (and b (collect (cdr ins) (cons b matches))))
-                                       (let ((matches (reverse matches)))
-                                         (let add ((vars (pattern-vars sr repeated)) (binds binds))
-                                           (if (null? vars)
-                                               (match-each sr after (list-tail inputs (+ n-before reps)) same? binds)
-                                               (add (cdr vars)
-                                                    (cons (cons (car vars)
-                                                                (cons 'many (map (lambda (b) (cdr (assq (car vars) b))) matches)))
-                                                          binds)))))))
-                                 binds)))
-                        (and binds
-                             (if (null? tail)
-                                 (and (null? input-tail) binds)
-                                 (match-pattern sr tail input-tail same? binds)))))))))))
+;; A seq matcher against a list's items and final cdr.
+(define (match-sequence m inputs input-tail same? binds)
+  (let* ((repeated (vector-ref m 2))
+         (n-before (vector-ref m 6))
+         (n (- (length inputs) n-before (vector-ref m 7)))
+         (reps (if repeated (and (>= n 0) n) (and (= n 0) 0))))
+    (and reps
+         (let ((binds (match-each (vector-ref m 1) inputs same? binds)))
+           (and binds
+                (let ((binds
+                       (if repeated
+                           (let collect ((ins (list-tail inputs n-before)) (i 0) (matches '()))
+                             (if (< i reps)
+                                 (let ((b (match repeated (car ins) same? '())))
+                                   (and b (collect (cdr ins) (+ i 1) (cons b matches))))
+                                 (let ((matches (reverse matches)))
+                                   (let add ((vars (vector-ref m 5)) (binds binds))
+                                     (if (null? vars)
+                                         (match-each (vector-ref m 3) ins same? binds)
+                                         (add (cdr vars)
+                                              (cons (cons (car vars)
+                                                          (cons 'many (map (lambda (b) (cdr (assq (car vars) b))) matches)))
+                                                    binds)))))))
+                           binds)))
+                  (and binds (match (vector-ref m 4) input-tail same? binds))))))))
 
 ;; The pattern variables in `pattern`, in order.
 (define (pattern-vars sr pattern)
@@ -186,6 +207,55 @@
                    (loop (cdr items)))))
            (collect-pattern-vars sr (cdr parts) depth out)))))
 
+;;; Templates, like patterns, are analysed once, when the macro is
+;;; defined, into a tagged vector:
+;;;
+;;;   #(pvar id)  #(ident id)  #(const x)
+;;;   #(list (item ...) tail)   item a template, or #(rep t depth vars raw):
+;;;                             t followed by depth ellipses, vars the
+;;;                             pattern variables in it, raw for messages
+;;;   #(vec (item ...))
+;;;
+;;; `vars` are the rule's pattern variables. Inside (... template) the
+;;; ellipsis is an ordinary identifier.
+
+(define (compile-template sr t vars escaped?)
+  (cond ((identifier? t) (if (memq t vars) (vector 'pvar t) (vector 'ident t)))
+        ((pair? t)
+         (if (and (not escaped?) (ellipsis? sr (car t)) (pair? (cdr t)))
+             (compile-template sr (cadr t) vars #t)
+             (let ((parts (list-parts t)))
+               (vector 'list (compile-items sr (car parts) vars escaped?)
+                       (compile-template sr (cdr parts) vars escaped?)))))
+        ((vector? t) (vector 'vec (compile-items sr (vector->list t) vars escaped?)))
+        (else (vector 'const t))))
+
+;; The elements of a list or vector template, with `sub ...` as a rep.
+(define (compile-items sr items vars escaped?)
+  (let loop ((items items) (out '()))
+    (if (null? items)
+        (reverse out)
+        (let ((depth (if escaped?
+                         0
+                         (let count ((rest (cdr items)) (n 0))
+                           (if (and (pair? rest) (ellipsis? sr (car rest))) (count (cdr rest) (+ n 1)) n)))))
+          (if (= depth 0)
+              (loop (cdr items) (cons (compile-template sr (car items) vars escaped?) out))
+              (loop (list-tail (cdr items) depth)
+                    (cons (vector 'rep (compile-template sr (car items) vars escaped?) depth
+                                  (template-vars (car items) vars) (car items))
+                          out)))))))
+
+;; The pattern variables occurring in `template`, in order, once each.
+(define (template-vars template vars)
+  (let ((out '()))
+    (let walk ((t template))
+      (cond ((identifier? t)
+             (if (and (memq t vars) (not (memq t out))) (set! out (cons t out))))
+            ((pair? t) (walk (car t)) (walk (cdr t)))
+            ((vector? t) (for-each walk (vector->list t)))))
+    (reverse out)))
+
 ;;; Instantiation: one fresh alias per distinct identifier the template
 ;;; introduces, per expansion.
 
@@ -196,47 +266,33 @@
             (else (let ((a (%make-alias id (transformer-depth sr) (transformer-env sr))))
                     (set! renames (cons (cons id a) renames))
                     a))))
-    ;; `escaped` is true inside (... template), where the ellipsis is
-    ;; an ordinary identifier.
-    (define (inst template binds escaped?)
-      (cond ((identifier? template)
-             (let ((b (assq template binds)))
-               (cond ((not b) (rename template))
-                     ((eq? (car (cdr b)) 'one) (cdr (cdr b)))
-                     (else (fail (string-append "syntax-rules: pattern variable " (show template)
-                                                " used without an ellipsis"))))))
-            ((pair? template)
-             (if (and (not escaped?) (ellipsis? sr (car template)) (pair? (cdr template)))
-                 (inst (cadr template) binds #t)
-                 (let* ((parts (list-parts template))
-                        (out (inst-items (car parts) binds escaped?))
-                        (tail (inst (cdr parts) binds escaped?)))
-                   (append out tail))))
-            ((vector? template) (list->vector (inst-items (vector->list template) binds escaped?)))
-            (else template)))
-    ;; The elements of a list or vector template, expanding `sub ...`.
-    (define (inst-items items binds escaped?)
+    (define (inst t binds)
+      (let ((tag (vector-ref t 0)))
+        (cond ((eq? tag 'pvar)
+               (let ((b (cdr (assq (vector-ref t 1) binds))))
+                 (if (eq? (car b) 'one)
+                     (cdr b)
+                     (fail (string-append "syntax-rules: pattern variable " (show (vector-ref t 1))
+                                          " used without an ellipsis")))))
+              ((eq? tag 'ident) (rename (vector-ref t 1)))
+              ((eq? tag 'list) (append (inst-items (vector-ref t 1) binds) (inst (vector-ref t 2) binds)))
+              ((eq? tag 'vec) (list->vector (inst-items (vector-ref t 1) binds)))
+              (else (vector-ref t 1)))))
+    (define (inst-items items binds)
       (let loop ((items items) (out '()))
-        (if (null? items)
-            (reverse out)
-            (let ((depth (if escaped?
-                             0
-                             (let count ((rest (cdr items)) (n 0))
-                               (if (and (pair? rest) (ellipsis? sr (car rest))) (count (cdr rest) (+ n 1)) n)))))
-              (if (= depth 0)
-                  (loop (cdr items) (cons (inst (car items) binds escaped?) out))
-                  (loop (list-tail (cdr items) depth)
-                        (append (reverse (inst-repeated (car items) binds depth)) out)))))))
-    ;; `sub ...` with `depth` ellipses: the list of results.
-    (define (inst-repeated sub binds depth)
-      (let* ((vars (template-vars sub binds))
-             (seqs (let loop ((vars vars) (seqs '()))
-                     (if (null? vars)
-                         (reverse seqs)
-                         (let ((b (cdr (assq (car vars) binds))))
-                           (loop (cdr vars) (if (eq? (car b) 'many) (cons (cons (car vars) (cdr b)) seqs) seqs)))))))
+        (cond ((null? items) (reverse out))
+              ((eq? (vector-ref (car items) 0) 'rep)
+               (loop (cdr items) (append (reverse (inst-repeated (car items) binds (vector-ref (car items) 2))) out)))
+              (else (loop (cdr items) (cons (inst (car items) binds) out))))))
+    ;; A rep with `depth` ellipses left: the list of results.
+    (define (inst-repeated rep binds depth)
+      (let ((seqs (let loop ((vars (vector-ref rep 3)) (seqs '()))
+                    (if (null? vars)
+                        (reverse seqs)
+                        (let ((b (cdr (assq (car vars) binds))))
+                          (loop (cdr vars) (if (eq? (car b) 'many) (cons (cons (car vars) (cdr b)) seqs) seqs)))))))
         (if (null? seqs)
-            (fail (string-append "syntax-rules: no pattern variable to repeat in " (show sub))))
+            (fail (string-append "syntax-rules: no pattern variable to repeat in " (show (vector-ref rep 4)))))
         (let ((n (length (cdr (car seqs)))))
           (if (any? (lambda (s) (not (= (length (cdr s)) n))) seqs)
               (fail "syntax-rules: pattern variables repeat different numbers of times"))
@@ -249,20 +305,9 @@
                                    (add (cdr seqs) (cons (cons (car (car seqs)) (list-ref (cdr (car seqs)) i)) inner))))))
                   (loop (+ i 1)
                         (if (= depth 1)
-                            (cons (inst sub inner #f) out)
-                            (append (reverse (inst-repeated sub inner (- depth 1))) out)))))))))
-    (inst template binds #f)))
-
-;; The pattern variables (bound in `binds`) occurring in `template`, in
-;; order, once each.
-(define (template-vars template binds)
-  (let ((out '()))
-    (let walk ((t template))
-      (cond ((identifier? t)
-             (if (and (assq t binds) (not (memq t out))) (set! out (cons t out))))
-            ((pair? t) (walk (car t)) (walk (cdr t)))
-            ((vector? t) (for-each walk (vector->list t)))))
-    (reverse out)))
+                            (cons (inst (vector-ref rep 1) inner) out)
+                            (append (reverse (inst-repeated rep inner (- depth 1))) out)))))))))
+    (inst template binds)))
 
 ;;; Parsing: (syntax-rules [ellipsis] (literal ...) (pattern template) ...),
 ;;; defined in a scope of `depth` frames over `env`, checked, as a macro.
@@ -296,8 +341,9 @@
                                                   (if (assq v depths)
                                                       (fail (string-append "syntax-rules: pattern variable " (show v) " appears twice")))
                                                   (set! depths (cons (cons v d) depths))))
-                          (check-template sr template depths 0 #f))
-                        (cons pattern template))))
+                          (check-template sr template depths 0 #f)
+                          (cons (compile-pattern sr (cdr pattern))
+                                (compile-template sr template (map car depths) #f))))))
                   (cdr rest))))
             (%make-macro ellipsis (car literals) rules depth env)))))))
 

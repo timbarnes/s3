@@ -18,7 +18,9 @@
   ;; The top-level environment being compiled for (a library's, while
   ;; define-library expands its body).
   (env expander-env set-expander-env!)
-  ;; Each frame is a one-element vector holding ((id . binding) ...).
+  ;; Each frame is a vector #(bindings outer): bindings, ((id .
+  ;; binding) ...), are the frame's own, consed onto outer, those of the
+  ;; frames around it. So a lookup at any depth is one assq.
   (frames expander-frames set-expander-frames!)
   (nframes expander-nframes set-expander-nframes!)
   (next-id expander-next-id set-expander-next-id!)
@@ -34,7 +36,8 @@
   (expr (make-expander env '() 0 0 0) form #t))
 
 (define (push-frame! x bindings)
-  (set-expander-frames! x (cons (vector bindings) (expander-frames x)))
+  (let ((outer (if (null? (expander-frames x)) '() (vector-ref (car (expander-frames x)) 0))))
+    (set-expander-frames! x (cons (vector (append bindings outer) outer) (expander-frames x))))
   (set-expander-nframes! x (+ (expander-nframes x) 1)))
 
 (define (pop-frame! x)
@@ -54,15 +57,14 @@
 ;; top-level environment `env`.
 (define (resolve-in x id depth env)
   (let loop ((id id) (depth depth) (env env))
-    (let find ((frames (list-tail (expander-frames x) (- (expander-nframes x) depth))))
-      (cond ((null? frames)
+    (let ((frames (list-tail (expander-frames x) (- (expander-nframes x) depth))))
+      (cond ((and (pair? frames) (assq id (vector-ref (car frames) 0))) => cdr)
+            (else
              (let ((top (%env-lookup env id)))
                (cond ((and top (eq? (car top) 'variable)) (cons 'global (cons id env)))
                      (top top)
                      ((%alias? id) (loop (alias-original id) (alias-depth id) (alias-env id)))
-                     (else (cons 'global (cons id env))))))
-            ((assq id (vector-ref (car frames) 0)) => cdr)
-            (else (find (cdr frames)))))))
+                     (else (cons 'global (cons id env))))))))))
 
 ;; The cell of a bound global variable, if `key` is one in `env`.
 (define (bound-cell key env)
@@ -344,8 +346,11 @@
                (if (null? bindings) body (vector 'letrec bindings body)))))))))
 
 (define (check-unbound-in-frame x name)
-  (if (assq name (vector-ref (car (expander-frames x)) 0))
-      (fail (string-append "define: duplicate definition: " (show name)))))
+  (let ((frame (car (expander-frames x))))
+    (let loop ((bs (vector-ref frame 0)))
+      (cond ((eq? bs (vector-ref frame 1)) #f)
+            ((eq? (car (car bs)) name) (fail (string-append "define: duplicate definition: " (show name))))
+            (else (loop (cdr bs)))))))
 
 ;; (lambda formals body ...). `formals` is a list of identifiers, possibly
 ;; improper, or one identifier for all the arguments.
