@@ -73,6 +73,7 @@ const COMPILER_FILES: &[&str] = &[
     include_str!("../scheme/compiler/libraries.scm"),
     include_str!("../scheme/compiler/expand.scm"),
     include_str!("../scheme/compiler/derived.scm"),
+    include_str!("../scheme/compiler/inline.scm"),
     include_str!("../scheme/compiler/driver.scm"),
 ];
 

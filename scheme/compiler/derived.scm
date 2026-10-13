@@ -154,7 +154,8 @@
 (define (case-clauses x keyword key clauses top? in-body?)
   (let ((else-b (top-binding x 'else))
         (arrow-b (top-binding x '=>))
-        (memv-cell (%env-cell (%system-environment) 'memv)))
+        (memv-cell (%env-cell (%system-environment) 'memv))
+        (eq-cell (%env-cell (%system-environment) 'eq?)))
     (define (key-node) (if (eq? (car key) 'temp) (local-node (cdr key)) (expr x (cdr key) #f)))
     (define (shown clauses) (cons keyword (cons (if (eq? (car key) 'temp) 'atom-key (cdr key)) clauses)))
     (let loop ((clauses clauses) (top? top?) (in-body? in-body?))
@@ -174,12 +175,32 @@
                ;; (if (memv key '(atom ...)) (result key) (case key ...)), or
                ;; (if (memv key '(atom ...)) (begin result1 ...) (case key ...))
                (let* ((els (rest))
-                      (test (vector 'call (vector 'global-ref memv-cell)
-                                    (list (key-node) (vector 'const (%strip-datum (car clause))))))
+                      (test (atoms-test (%strip-datum (car clause)) key-node memv-cell eq-cell))
                       (then (if arrow?
                                 (let ((f (expr x (caddr clause) #f))) (vector 'call f (list (key-node))))
                                 (sequence x (cdr clause) #f))))
                  (vector 'if test then els))))))))
+
+;; Whether the key is one of `atoms`. The macro called memv. Atoms that
+;; are eqv? exactly when they are eq? (symbols, booleans, characters, (),
+;; fixnums) are compared with eq? instead, which compiles to one
+;; instruction, when there are few: (or (eq? key 'a) (eq? key 'b)), as
+;; nested ifs. A longer list keeps memv, a loop in Rust. This changes the
+;; code from the macro's (S1 step 3), not the result.
+(define max-eq-atoms 3)
+
+(define (atoms-test atoms key-node memv-cell eq-cell)
+  (define (eq-test atom) (vector 'call (vector 'global-ref eq-cell) (list (key-node) (vector 'const atom))))
+  (if (and (pair? atoms) (<= (length atoms) max-eq-atoms) (every? eq-comparable? atoms))
+      (let loop ((atoms atoms))
+        (if (null? (cdr atoms))
+            (eq-test (car atoms))
+            (vector 'if (eq-test (car atoms)) (vector 'const #t) (loop (cdr atoms)))))
+      (vector 'call (vector 'global-ref memv-cell) (list (key-node) (vector 'const atoms)))))
+
+(define (eq-comparable? a)
+  (or (symbol? a) (boolean? a) (char? a) (null? a)
+      (and (exact-integer? a) (<= -140737488355328 a 140737488355327))))
 
 ;; (do ((var init step ...) ...) (test expr ...) command ...):
 ;; (letrec ((loop (lambda (var ...)

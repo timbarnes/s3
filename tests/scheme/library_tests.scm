@@ -330,3 +330,52 @@
     (s3 (begin (define which 'right)))))
 (import (test expanded))
 (test-equal 'right which "cond-expand declarations in define-library")
+
+(display "          === Testing inlining within a library (plan/09, S1) ===")
+(newline)
+
+(define-library (test inline)
+  (export f1 f2 f3 f4 f5 bump! early)
+  (import (scheme base))
+  (begin
+    (define (sq x) (* x x))
+    (define (f1 y) (sq (+ y 1)))                 ; an argument bound by a let
+    (define (add1! x) (set! x (+ x 1)) x)        ; a parameter the body assigns
+    (define (f2 y) (list (add1! y) y))
+    (define (ev? n) (if (= n 0) #t (od? (- n 1)))) ; inlining each other
+    (define (od? n) (if (= n 0) #f (ev? (- n 1))))
+    (define (f3 n) (ev? n))
+    (define (two a b) (list a b))
+    (define (f4 y) (two y (begin (set! y 10) y))) ; a variable another argument assigns
+    (define (f5) (sq 1 2))                       ; the wrong number of arguments
+    (define counter 0)
+    (define (get) counter)
+    (define (bump!) (set! counter (+ counter 1)) (get))
+    ;; Inlined, a procedure runs even before its definition has.
+    (define early (guard (e (#t 'unbound)) (later 1)))
+    (define (later x) x)))
+(import (test inline))
+(test-equal 1 early "inlined before its definition ran")
+(test-equal 9 (f1 2) "inlined, argument in a let")
+(test-equal '(6 5) (f2 5) "inlined, parameter assigned in the body")
+(test-equal '(#t #f) (list (f3 10) (f3 7)) "procedures that call each other")
+(test-equal '(1 10) (f4 1) "argument read before another assigns it")
+(test-equal #t (guard (e (#t (error-object? e))) (f5) #f) "wrong argument count still an error")
+(test-equal '(1 2) (let* ((a (bump!)) (b (bump!))) (list a b)) "inlined reader of an assigned variable")
+
+(define-library (test no-inline)
+  (export uses-impl swap-impl! early)
+  (import (scheme base))
+  (begin
+    (define (impl) 'first)
+    (define (uses-impl) (impl))
+    ;; Assigns a procedure from the importer's code, so nothing here is
+    ;; inlined.
+    (define-syntax swap-impl! (syntax-rules () ((_) (set! impl (lambda () 'second)))))
+    (define early (guard (e (#t 'unbound)) (later 1)))
+    (define (later x) x)))
+(import (prefix (test no-inline) n:))
+(test-equal 'unbound n:early "not inlined: unbound before its definition")
+(test-equal 'first (n:uses-impl) "before the macro assigns")
+(n:swap-impl!)
+(test-equal 'second (n:uses-impl) "a macro that assigns turns inlining off")

@@ -13,7 +13,7 @@
 ;;; what its original means in the macro's definition scope.
 
 (define-record-type expander
-  (make-expander env frames nframes next-id nesting)
+  (make-expander env frames nframes next-id nesting macros)
   expander?
   ;; The top-level environment being compiled for (a library's, while
   ;; define-library expands its body).
@@ -25,7 +25,9 @@
   (nframes expander-nframes set-expander-nframes!)
   (next-id expander-next-id set-expander-next-id!)
   ;; Macro expansions in progress, each inside the last.
-  (nesting expander-nesting set-expander-nesting!))
+  (nesting expander-nesting set-expander-nesting!)
+  ;; The macros top-level define-syntax forms defined, for inlining.
+  (macros expander-macros set-expander-macros!))
 
 ;; The deepest nesting of macro uses allowed, to turn a macro that expands
 ;; forever into an error.
@@ -33,7 +35,7 @@
 
 ;; Expand a top-level form for the environment `env`.
 (define (expand form env)
-  (expr (make-expander env '() 0 0 0) form #t))
+  (expr (make-expander env '() 0 0 0 '()) form #t))
 
 (define (push-frame! x bindings)
   (let ((outer (if (null? (expander-frames x)) '() (vector-ref (car (expander-frames x)) 0))))
@@ -255,6 +257,7 @@
       (syntax-error "define-syntax" items))
   (let ((m (transformer x (caddr items) 0)))
     (%env-define-syntax (expander-env x) (cadr items) m)
+    (set-expander-macros! x (cons m (expander-macros x)))
     (vector 'const (strip (cadr items)))))
 
 ;; A macro from `spec`, which must be a syntax-rules form, defined in the
@@ -563,7 +566,8 @@
                     (each (cdr bindings) (cons b seen)))))))
       (let ((saved (expander-env x)))
         (set-expander-env! x lib)
-        (let ((body (map-in-order (lambda (f) (expr x f #t)) (declarations-body decls))))
+        (let ((body (inline-library x (map-in-order (lambda (f) (expr x f #t)) (declarations-body decls))
+                                    (expander-macros x) lib)))
           (set-expander-env! x saved)
           (let ((exports (map (lambda (e) (cons (car e) (cdr e))) (declarations-exports decls))))
             (vector 'seq (append body (list (global-call x "%register-library"
