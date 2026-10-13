@@ -2,7 +2,7 @@
 
 R7RS: [section 4.2, Derived expression types](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-6.html#TAG:__tex2page_sec_4.2). The report calls these forms "derived" because they can be defined in terms of the [primitive expressions](./primitive-expressions.md), and gives reference definitions in [section 7.3](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-9.html#TAG:__tex2page_sec_7.3).
 
-In s3, `let`, named `let`, `letrec`, `letrec*`, `begin` and `quasiquote` are core forms of the compiler. The others (`cond`, `case`, `and`, `or`, `when`, `unless`, `let*`, `do`, `let-values`, `let*-values`, `define-values`, `parameterize`, `delay`, `delay-force`, `case-lambda`, `guard`) are hygienic `syntax-rules` macros in `scheme/core.scm`. Either way they are hygienic: rebinding `if`, `let` or `lambda` locally can't change what they do.
+In s3, `let`, named `let`, `letrec`, `letrec*`, `begin` and `quasiquote` are core forms of the compiler, and so, for speed of compiling, are `cond`, `case`, `and`, `or`, `when`, `unless`, `let*` and `do`, which expand exactly as R7RS's `syntax-rules` definitions would. The others (`let-values`, `let*-values`, `define-values`, `parameterize`, `delay`, `delay-force`, `case-lambda`, `guard`) are hygienic `syntax-rules` macros in `scheme/core.scm`. Either way they are hygienic: rebinding `if`, `let` or `lambda` locally can't change what they do.
 
 `guard` is described in [Exceptions](./exceptions.md#guard), and `cond-expand` in [Libraries](./libraries.md#cond-expand-and-features).
 

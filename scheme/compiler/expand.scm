@@ -186,6 +186,15 @@
       ((lambda)
        (if (>= n 3) (lambda-form x "" (cadr items) (cddr items)) (syntax-error keyword items)))
       ((let) (let-form x items))
+      ;; The derived forms (derived.scm).
+      ((and) (and-form x items top?))
+      ((or) (or-form x items top?))
+      ((when) (when-form x items))
+      ((unless) (unless-form x items))
+      ((let*) (let*-form x items))
+      ((cond) (cond-form x items top?))
+      ((case) (case-form x items top?))
+      ((do) (do-form x items))
       ((letrec letrec*) (letrec-form x keyword items))
       ((let-syntax) (let-syntax-form x keyword items #f))
       ((letrec-syntax) (let-syntax-form x keyword items #t))
@@ -355,6 +364,11 @@
 ;; (lambda formals body ...). `formals` is a list of identifiers, possibly
 ;; improper, or one identifier for all the arguments.
 (define (lambda-form x name formals body-forms)
+  (lambda-node x name formals (lambda () (body x body-forms))))
+
+;; The lambda with those formals, whose body `make-body` expands inside
+;; the parameters' scope.
+(define (lambda-node x name formals make-body)
   (let* ((parts (list-parts formals))
          (params (map-in-order (lambda (item)
                                  (if (not (identifier? item))
@@ -371,7 +385,7 @@
             (if (memq (var-name (car vars)) seen)
                 (fail (string-append "lambda: duplicate parameter: " (show (var-name (car vars))))))
             (check (cons (var-name (car vars)) seen) (cdr vars)))))
-    (vector 'lambda name params rest (scoped x all (lambda () (body x body-forms))))))
+    (vector 'lambda name params rest (scoped x all make-body))))
 
 ;; (let ((v init) ...) body ...), or a named let.
 (define (let-form x items)

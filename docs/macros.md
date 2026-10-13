@@ -61,7 +61,7 @@ Identifiers that a template introduces (not pattern variables) behave as if rena
 * **Definitions they introduce are hidden.** If a template expands to `(define helper ...)`, `helper` is visible to the code the same expansion produced, including macros it defines, but not to user code, even at top level. Names the user passes in (`(define-getter name ...)`) are defined normally.
 * **Quoted data is plain.** Symbols inside a quoted part of a template, a quasiquoted part, or a vector literal are ordinary symbols: `'(a b)` in a template yields a list whose `a` is `eq?` to the user's `'a`.
 
-The derived forms in `scheme/core.scm` (`cond`, `case`, `do`, `guard`, `parameterize`, ...) are `syntax-rules` macros, and so are hygienic in the same way: binding `lambda`, `let`, `if` or `loop` locally can't affect them.
+The derived forms (`cond`, `case`, `do`, `guard`, `parameterize`, ...) are hygienic in the same way: binding `lambda`, `let`, `if` or `loop` locally can't affect them. Most are `syntax-rules` macros in `scheme/core.scm`; `cond`, `case`, `and`, `or`, `when`, `unless`, `let*` and `do` are expanded by the compiler itself, as their `syntax-rules` definitions would be.
 
 ### Errors appear when a form is compiled
 

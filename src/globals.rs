@@ -68,6 +68,16 @@ pub enum Core {
     /// an imported `else` renamed `otherwise`, and not a local variable
     /// named `else`. Used as an expression, they are an error.
     Auxiliary,
+    // The derived forms (R7RS §7.3), expanded by
+    // scheme/compiler/derived.scm (plan/09, S1).
+    And,
+    Or,
+    When,
+    Unless,
+    LetStar,
+    Cond,
+    Case,
+    Do,
 }
 
 /// The core forms' names, bound in every top-level environment.
@@ -98,6 +108,15 @@ pub const CORE_FORMS: &[(&str, Core)] = &[
     ("=>", Core::Auxiliary),
     ("_", Core::Auxiliary),
     ("...", Core::Auxiliary),
+    // After the rest, so compiled files' indexes for those stay as they were.
+    ("and", Core::And),
+    ("or", Core::Or),
+    ("when", Core::When),
+    ("unless", Core::Unless),
+    ("let*", Core::LetStar),
+    ("cond", Core::Cond),
+    ("case", Core::Case),
+    ("do", Core::Do),
 ];
 
 #[derive(Clone, Copy, PartialEq)]
