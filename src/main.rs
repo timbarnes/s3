@@ -43,9 +43,46 @@ use std::io::{IsTerminal, Write};
 use std::path::Path;
 
 /// The global allocator: mimalloc, as in s1, so benchmarks against s1
-/// compare like with like.
+/// compare like with like. Called directly rather than through the
+/// `mimalloc` crate, which asks for every block by alignment: when a
+/// page's free list is empty, as it often is after a sweep, mimalloc's
+/// aligned path then over-allocates and searches, where `mi_malloc`
+/// refills the list. Every mimalloc block is 16-byte aligned, so only a
+/// larger alignment needs the aligned calls.
+struct Mimalloc;
+
+const MI_MAX_ALIGN: usize = 16;
+
+unsafe impl std::alloc::GlobalAlloc for Mimalloc {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        use libmimalloc_sys::*;
+        // SAFETY: mimalloc's malloc, for the layout's size and alignment.
+        unsafe {
+            (if layout.align() <= MI_MAX_ALIGN { mi_malloc(layout.size()) } else { mi_malloc_aligned(layout.size(), layout.align()) }) as *mut u8
+        }
+    }
+    unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
+        use libmimalloc_sys::*;
+        // SAFETY: as for alloc.
+        unsafe {
+            (if layout.align() <= MI_MAX_ALIGN { mi_zalloc(layout.size()) } else { mi_zalloc_aligned(layout.size(), layout.align()) }) as *mut u8
+        }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, _: std::alloc::Layout) {
+        // SAFETY: `ptr` came from mimalloc.
+        unsafe { libmimalloc_sys::mi_free(ptr.cast()) }
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, size: usize) -> *mut u8 {
+        use libmimalloc_sys::*;
+        // SAFETY: `ptr` came from mimalloc, with this layout.
+        unsafe {
+            (if layout.align() <= MI_MAX_ALIGN { mi_realloc(ptr.cast(), size) } else { mi_realloc_aligned(ptr.cast(), size, layout.align()) }) as *mut u8
+        }
+    }
+}
+
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: Mimalloc = Mimalloc;
 
 use globals::{Env, env_of};
 use heap::GcRef;

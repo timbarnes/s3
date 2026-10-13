@@ -136,7 +136,7 @@ impl Num {
         }
         match kind(v) {
             Some(Obj::BigInt(i)) => Ok(Num::Int(i.clone())),
-            Some(Obj::Rational(r)) => Ok(Num::Rat(r.clone())),
+            Some(Obj::Rational(r)) => Ok(Num::Rat((**r).clone())),
             _ => Err(err!("{}: expected a number, got {}", who, print_value(v))),
         }
     }

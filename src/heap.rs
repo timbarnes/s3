@@ -71,6 +71,13 @@ pub struct GcObject {
     pub kind: Obj,
 }
 
+// An object is one 80-byte allocation. The large, rarely made variants
+// (templates, macros, environments, ports, ratios) are boxed: unboxed, a
+// template made every pair 128 bytes. The largest left is Escape;
+// ponytail: boxing its frame would make 48, but changing its code in the
+// dispatch loop made calls 10-20% slower (plan/09).
+const _: () = assert!(std::mem::size_of::<GcObject>() == 80);
+
 /// The kinds of heap object.
 pub enum Obj {
     Pair { car: Cell<Value>, cdr: Cell<Value> },
@@ -82,7 +89,7 @@ pub enum Obj {
     /// An exact integer outside the fixnum range. Never one that fits.
     BigInt(BigInt),
     /// An exact non-integer, in lowest terms.
-    Rational(BigRational),
+    Rational(Box<BigRational>),
     /// A top-level binding cell (D7): a global variable. Holds
     /// `Value::UNDEFINED` until the variable is defined.
     Global { name: GcRef, value: Cell<Value> },
@@ -94,17 +101,17 @@ pub enum Obj {
     /// `env`. Prints as its symbol's name.
     Alias { original: Value, depth: u32, env: GcRef },
     /// A top-level environment (`globals.rs`).
-    Environment(RefCell<Env>),
+    Environment(Box<RefCell<Env>>),
     /// A `syntax-rules` transformer, bound by `define-syntax`,
     /// `let-syntax` or `letrec-syntax`. Exists only at compile time.
-    Macro(SyntaxRules),
+    Macro(Box<SyntaxRules>),
     /// A variable that is both captured and assigned, or used before its
     /// `letrec` init has run (03 §7, `analyze::boxed_variables`). Closures
     /// copy the box, so they share the variable. Never seen by Scheme code.
     Box(Cell<Value>),
     /// An input or output port (R7RS §6.13). Port procedures change it in
     /// place, so every reference sees the same position and state.
-    Port(RefCell<PortKind>),
+    Port(Box<RefCell<PortKind>>),
     /// A record type made by `define-record-type`: its name, and its field
     /// names in order.
     RecordType { name: Value, fields: Box<[Value]> },
@@ -128,7 +135,7 @@ pub enum Obj {
     Primitive(&'static Primitive),
     /// Compiled code (`vm/op.rs`). Templates are heap objects so that a
     /// template's constant pool can hold the templates of its inner lambdas.
-    Template(Template),
+    Template(Box<Template>),
     /// A procedure written in Scheme: a template plus the values of its free
     /// variables, copied when the closure was made (a flat closure, D6).
     /// The slots are cells only so that a `letrec` of lambdas can fill in
@@ -312,7 +319,7 @@ impl Heap {
         if r.denom().is_one() {
             self.integer(r.to_integer())
         } else {
-            self.alloc(Obj::Rational(r))
+            self.alloc(Obj::Rational(Box::new(r)))
         }
     }
 
@@ -327,7 +334,7 @@ impl Heap {
     }
 
     pub fn template(&mut self, t: Template) -> GcRef {
-        self.alloc(Obj::Template(t)).as_ref().unwrap()
+        self.alloc(Obj::Template(Box::new(t))).as_ref().unwrap()
     }
 
     pub fn alias(&mut self, original: Value, depth: u32, env: GcRef) -> Value {
@@ -335,15 +342,15 @@ impl Heap {
     }
 
     pub fn environment(&mut self, env: Env) -> GcRef {
-        self.alloc(Obj::Environment(RefCell::new(env))).as_ref().unwrap()
+        self.alloc(Obj::Environment(Box::new(RefCell::new(env)))).as_ref().unwrap()
     }
 
     pub fn make_macro(&mut self, rules: SyntaxRules) -> GcRef {
-        self.alloc(Obj::Macro(rules)).as_ref().unwrap()
+        self.alloc(Obj::Macro(Box::new(rules))).as_ref().unwrap()
     }
 
     pub fn port(&mut self, port: PortKind) -> Value {
-        self.alloc(Obj::Port(RefCell::new(port)))
+        self.alloc(Obj::Port(Box::new(RefCell::new(port))))
     }
 
     pub fn record_type(&mut self, name: Value, fields: Vec<Value>) -> Value {

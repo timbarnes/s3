@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-mimalloc = "0.1.52"
+libmimalloc-sys = "0.1.49"
 num-bigint = "0.4.6"
 num-integer = "0.1"
 num-rational = "0.4"
