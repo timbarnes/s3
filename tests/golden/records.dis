@@ -1,0 +1,67 @@
+template top-level
+   0  GlobalRef k0     ; %make-record-type
+   1  Const k1         ; point
+   2  Const k2         ; ((x point-x set-point-x!) (y point-y))
+   3  Call 2
+   4  GlobalDefine k3  ; point
+   5  Pop
+   6  MakeClosure k4   ; #<template make-point>
+   7  GlobalDefine k5  ; make-point
+   8  Pop
+   9  MakeClosure k6   ; #<template point?>
+  10  GlobalDefine k7  ; point?
+  11  Pop
+  12  GlobalRef k8     ; %record-index
+  13  GlobalRef k3     ; point
+  14  Const k9         ; x
+  15  Call 2
+  16  GlobalDefine k10 ; index
+  17  Pop
+  18  MakeClosure k11  ; #<template point-x>
+  19  GlobalDefine k12 ; point-x
+  20  Pop
+  21  MakeClosure k13  ; #<template set-point-x!>
+  22  GlobalDefine k14 ; set-point-x!
+  23  Pop
+  24  GlobalRef k8     ; %record-index
+  25  GlobalRef k3     ; point
+  26  Const k15        ; y
+  27  Call 2
+  28  GlobalDefine k16 ; index
+  29  Pop
+  30  MakeClosure k17  ; #<template point-y>
+  31  GlobalDefine k18 ; point-y
+  32  Return
+template make-point  arity 2
+   0  GlobalRef k0     ; %record-make
+   1  GlobalRef k1     ; point
+   2  Const k2         ; (x y)
+   3  GlobalRef k3     ; list
+   4  LocalRef 0       ; x
+   5  LocalRef 1       ; y
+   6  Call 2
+   7  TailCall 3
+template point?  arity 1
+   0  GlobalRef k0     ; %record?
+   1  LocalRef 0       ; obj
+   2  GlobalRef k1     ; point
+   3  TailCall 2
+template point-x  arity 1
+   0  LocalRef 0       ; obj
+   1  GlobalRef k0     ; point
+   2  GlobalRef k1     ; index
+   3  RecordRef
+   4  Return
+template set-point-x!  arity 2
+   0  LocalRef 0       ; obj
+   1  GlobalRef k0     ; point
+   2  GlobalRef k1     ; index
+   3  LocalRef 1       ; value
+   4  RecordSet
+   5  Return
+template point-y  arity 1
+   0  LocalRef 0       ; obj
+   1  GlobalRef k0     ; point
+   2  GlobalRef k1     ; index
+   3  RecordRef
+   4  Return

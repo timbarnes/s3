@@ -104,7 +104,8 @@ pub fn verify(t: &Template) -> Result<(), String> {
             }
             Op::Cons | Op::EqP | Op::Add | Op::Sub | Op::Mul | Op::Div => (2, 1, None, true),
             Op::NumEq | Op::Lt | Op::Gt | Op::Le | Op::Ge | Op::VectorRef => (2, 1, None, true),
-            Op::VectorSet => (3, 1, None, true),
+            Op::VectorSet | Op::RecordRef => (3, 1, None, true),
+            Op::RecordSet => (4, 1, None, true),
         };
         if pop > d {
             return Err(at(ip, &format!("pops {} of {} values", pop, d)));

@@ -228,6 +228,8 @@ instructions! {
     VectorLength "vector-length";
     VectorRef "vector-ref";
     VectorSet "vector-set";
+    RecordRef "record-ref";
+    RecordSet "record-set";
     CarLocal "car-local" (i);
     CdrLocal "cdr-local" (i);
     AddImm "add-imm" (k);

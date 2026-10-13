@@ -554,6 +554,8 @@ fn put_op(b: &mut Vec<u8>, op: Op) {
             put_int(b, k as i64);
             u(b, t as u64);
         }
+        Op::RecordRef => b.push(51),
+        Op::RecordSet => b.push(52),
     }
 }
 
@@ -695,6 +697,8 @@ impl Reader<'_> {
                 let k = i16::try_from(self.int()?).map_err(|_| TRUNCATED)?;
                 Op::JumpIfNotImm(test, k, self.small()?)
             }
+            51 => Op::RecordRef,
+            52 => Op::RecordSet,
             _ => return Err(TRUNCATED.into()),
         })
     }

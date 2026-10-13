@@ -22,11 +22,8 @@ pub static PRIMITIVES: &[Primitive] = &[
         Ok(record_fields(a[0], a[1], "record accessor")?[i].get())
     }),
     prim("%record-index", 2, Some(2), |_, a| Ok(super::fixnum(field_index(a[0], a[1], "define-record-type")?))),
-    prim("%record-ref", 3, Some(3), |_, a| Ok(field(a, "record accessor")?.get())),
-    prim("%record-set-index!", 4, Some(4), |_, a| {
-        field(a, "record modifier")?.set(a[3]);
-        Ok(Value::UNSPECIFIED)
-    }),
+    prim("%record-ref", 3, Some(3), record_ref),
+    prim("%record-set-index!", 4, Some(4), record_set_index),
     prim("%record-set!", 4, Some(4), |_, a| {
         let i = field_index(a[1], a[2], "record modifier")?;
         record_fields(a[0], a[1], "record modifier")?[i].set(a[3]);
@@ -56,6 +53,18 @@ fn field_index(rtype: Value, field: Value, who: &str) -> Result<usize, Error> {
         .iter()
         .position(|f| f.eq(field))
         .ok_or_else(|| err!("{}: {} has no field {}", who, print_value(name), print_value(field)))
+}
+
+/// `(%record-ref obj type index)`: what an accessor does (`Op::RecordRef`).
+pub fn record_ref(_: &mut Heap, a: &[Value]) -> Result<Value, Error> {
+    Ok(field(a, "record accessor")?.get())
+}
+
+/// `(%record-set-index! obj type index value)`: what a modifier does
+/// (`Op::RecordSet`).
+pub fn record_set_index(_: &mut Heap, a: &[Value]) -> Result<Value, Error> {
+    field(a, "record modifier")?.set(a[3]);
+    Ok(Value::UNSPECIFIED)
 }
 
 /// The fields of `obj`, which must be a record of type `rtype`.

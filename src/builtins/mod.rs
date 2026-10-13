@@ -19,7 +19,7 @@ pub mod list;
 pub mod number;
 mod port;
 pub mod predicate;
-mod record;
+pub mod record;
 mod string;
 mod system;
 pub mod vector;

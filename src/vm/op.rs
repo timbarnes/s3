@@ -106,6 +106,10 @@ pub enum Op {
     VectorLength,
     VectorRef,
     VectorSet,
+    /// `(%record-ref obj type index)`: a record accessor's body.
+    RecordRef,
+    /// `(%record-set-index! obj type index value)`: a modifier's.
+    RecordSet,
     // Superinstructions (after P12), chosen from the instruction counts
     // of the r7rs benchmarks. Each does what the two instructions it
     // replaces would, fast and slow path alike.
@@ -166,6 +170,8 @@ impl Op {
             ("vector-length", 1) => Op::VectorLength,
             ("vector-ref", 2) => Op::VectorRef,
             ("vector-set!", 3) => Op::VectorSet,
+            ("%record-ref", 3) => Op::RecordRef,
+            ("%record-set-index!", 4) => Op::RecordSet,
             _ => return None,
         })
     }

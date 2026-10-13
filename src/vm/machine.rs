@@ -43,7 +43,7 @@
 //! catches errors from builtins, unbound variables and bad calls alike.
 //! Only an error nobody handles comes out of `run`, through `%abort`.
 
-use crate::builtins::{Error, ErrorKind, PrimFn, Primitive, list, number, predicate, standard_ports, vector};
+use crate::builtins::{Error, ErrorKind, PrimFn, Primitive, list, number, predicate, record, standard_ports, vector};
 use crate::globals::{TopBinding, cell_name, cell_value, env_of};
 use crate::heap::{GcRef, Heap, Obj, list_to_vec};
 use crate::printer::{display_value, print_value};
@@ -174,6 +174,14 @@ fn compare(test: Test, a: Value, b: Value) -> Option<bool> {
 /// The element `k` of the vector `v`, if `k` is in range.
 fn element<'a>(v: Value, k: Value) -> Option<&'a std::cell::Cell<Value>> {
     vector_of(v)?.get(usize::try_from(k.as_fixnum()?).ok()?)
+}
+
+/// Field `index` of `obj`, if it is a record of type `rtype` that has one.
+fn field<'a>(obj: Value, rtype: Value, index: Value) -> Option<&'a std::cell::Cell<Value>> {
+    match obj.as_obj().map(|o| &o.kind) {
+        Some(Obj::Record { rtype: t, fields }) if Value::obj(*t).eq(rtype) => fields.get(usize::try_from(index.as_fixnum()?).ok()?),
+        _ => None,
+    }
 }
 
 fn box_contents<'a>(b: Value) -> &'a std::cell::Cell<Value> {
@@ -735,6 +743,26 @@ impl Vm {
                 Op::Ge => inline2!('run, |a, b| compare(Test::Ge, a, b).map(Value::bool), number::ge),
                 Op::VectorLength => inline1!('run, |a| vector_of(a).and_then(|items| Value::fixnum(items.len() as i64)), vector::vector_length),
                 Op::VectorRef => inline2!('run, |a, b| element(a, b).map(std::cell::Cell::get), vector::vector_ref),
+                Op::RecordRef => {
+                    let at = sp - 3;
+                    let v = fast_or_slow!('run, field(at!(at), at!(at + 1), at!(at + 2)).map(std::cell::Cell::get), record::record_ref(heap, slots!(at)));
+                    sp = at;
+                    push!(v);
+                }
+                Op::RecordSet => {
+                    let at = sp - 4;
+                    match field(at!(at), at!(at + 1), at!(at + 2)) {
+                        Some(cell) => cell.set(at!(at + 3)),
+                        None => {
+                            if let Err(e) = cold(|| record::record_set_index(heap, slots!(at))) {
+                                sync!();
+                                fail!('run, e);
+                            }
+                        }
+                    }
+                    sp = at;
+                    push!(Value::UNSPECIFIED);
+                }
                 Op::CarLocal(i) => {
                     let a = at!(fp + i as usize);
                     push!(fast_or_slow!('run, pair_of(a).map(|(car, _)| car.get()), list::car(heap, &[a])));
