@@ -72,7 +72,8 @@ mkdir -p "$work"
 # The prelude and postlude of each system, before and after the benchmark.
 prelude() {
     case $1 in
-        s3 | s1) echo "$here/name.scm" ;;
+        s3) echo "$here/s3-prelude.scm" ;;
+        s1) echo "$here/name.scm" ;;
         chibi) echo "$suite/src/Chibi-prelude.scm" ;;
         guile) echo "$suite/src/Guile3-prelude.scm" ;;
         s7) echo "$suite/src/S7-prelude.scm" ;;

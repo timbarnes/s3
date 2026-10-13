@@ -170,6 +170,19 @@ features that would make it practical rather than educational:
 
 ## Performance
 
+> **s3, 2026-10-13** (after S1, record access and inlining for programs;
+> one round, `bench/r7rs/run.sh -n 1 -t 120 "s3 gauche guile chicken
+> chez"`). s3 runs each benchmark as an R7RS program
+> (`bench/r7rs/s3-prelude.scm` puts an `import` first), so it is
+> inlined. Against the s2 column below, s3 is 1.43 times faster
+> (geometric mean over 56; Gauche, the control, within 3%). Time
+> relative to s3: Chez 0.097 (10x faster), Guile 0.27 (3.7x), Chicken
+> 0.43 (2.3x), Gauche 0.99. chibi wasn't rerun; from the table below it
+> would be about 5 times slower. Against Gauche, s3 is furthest behind
+> on allocation: `gcbench` 0.35, `divrec` and `earley` 0.40, `mperm`
+> 0.44 (Gauche's time over s3's), and ahead on `equal` 19x, `pi` 5.8x,
+> `parsing` 3.1x, `ack` and `read1` 2x. The tables below are s2's.
+
 > **These tables were rerun on 2026-10-12**, after s2's values were
 > NaN-boxed (D2, commit ffbe13f). Against P12's run, s2 is 1.24 times
 > faster (geometric mean over 56 benchmarks; 1.00-1.60x each, none
