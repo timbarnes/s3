@@ -564,11 +564,14 @@
                         (fail (string-append who ": " (show (car b)) " is imported with two different bindings")))
                     (%env-import lib (car b) (cdr b))
                     (each (cdr bindings) (cons b seen)))))))
-      (let ((saved (expander-env x)))
+      ;; The body's own macros: in a program, the expander has seen others.
+      (let ((saved (expander-env x)) (saved-macros (expander-macros x)))
         (set-expander-env! x lib)
-        (let ((body (inline-library x (map-in-order (lambda (f) (expr x f #t)) (declarations-body decls))
-                                    (expander-macros x) lib)))
+        (set-expander-macros! x '())
+        (let ((body (inline-body x (map-in-order (lambda (f) (expr x f #t)) (declarations-body decls))
+                                 (expander-macros x) lib)))
           (set-expander-env! x saved)
+          (set-expander-macros! x saved-macros)
           (let ((exports (map (lambda (e) (cons (car e) (cdr e))) (declarations-exports decls))))
             (vector 'seq (append body (list (global-call x "%register-library"
                                                          (list (vector 'const (cadr items))

@@ -7,6 +7,21 @@
 
 (define (compile form env) (codegen (expand form env)))
 
+;; A program's forms (R7RS 5.1), expanded in order as one body, so that
+;; its small procedures can be inlined (inline-body): their ASTs. A
+;; define-library among them is run when it is reached, so that the forms
+;; after it can import it, as one loaded from a file would be.
+(define (expand-program forms env)
+  (let* ((x (make-expander env '() 0 0 0 '()))
+         (nodes (map-in-order (lambda (form)
+                                (let ((node (expr x form #t)))
+                                  (if (library-form? form) ((%template->procedure (codegen node))))
+                                  node))
+                              forms)))
+    (inline-body x nodes (expander-macros x) env)))
+
+(define (library-form? form) (and (pair? form) (eq? (car form) 'define-library)))
+
 ;; eval (R7RS 6.12). The compiled form is called in tail position, so a
 ;; tail call to eval is still one.
 (define (eval-form . args)

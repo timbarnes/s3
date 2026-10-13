@@ -69,6 +69,35 @@ fn dis_prints_code_without_running_it() {
     assert!(String::from_utf8_lossy(&o.stderr).contains("if: bad syntax: (if)"));
 }
 
+/// A program that starts with an import is compiled as one body (plan/09):
+/// a small procedure is inlined at its calls, the library's too.
+#[test]
+fn programs_are_compiled_as_one_body() {
+    let path = std::env::temp_dir().join(format!("s3-cli-program-{}.scm", std::process::id()));
+    let program = "(import (scheme base) (scheme write))
+        (define-library (t lib) (export twice add1 show) (import (scheme base) (scheme write))
+          (begin (define (helper x) (* 2 x)) (define (twice x) (helper x))
+                 (define (unused x) (+ x 1)) (define (add1 x) (unused x))
+                 (define-syntax show (syntax-rules () ((_ e) (display (helper e)))))))
+        (import (t lib))
+        (define (sq x) (* x x))
+        (define (g y) (+ (sq y) (+ (twice y) (add1 y))))
+        (display (g 5)) (show 21)";
+    std::fs::write(&path, program).unwrap();
+    let run = s3(&[path.to_str().unwrap()], "");
+    let dis = s3(&["--dis", path.to_str().unwrap()], "");
+    std::fs::write(&path, "(import (scheme base) (scheme write)) (display 1) (display (").unwrap();
+    let bad = s3(&[path.to_str().unwrap()], "");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(stdout(&run), "4142");
+    let dis = stdout(&dis);
+    let g = dis.split("template ").find(|t| t.starts_with("g ")).unwrap();
+    assert!(!g.contains("Call"), "g calls nothing:\n{}", g);
+    // The whole program is read before any of it runs.
+    assert_eq!(stdout(&bad), "");
+    assert_eq!(bad.status.code(), Some(70));
+}
+
 #[test]
 fn expand_prints_the_core_ast() {
     let o = s3(&["--expand", "-e", "(let ((x 1)) (and x 2))"], "");

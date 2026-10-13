@@ -80,7 +80,7 @@ const COMPILER_FILES: &[&str] = &[
 /// `(s3 compiler)`'s source: a `define-library` around `COMPILER_FILES`.
 fn compiler_source() -> String {
     format!(
-        "(define-library (s3 compiler) (export expand codegen eval-form load-library dis-form) (import (scheme base) (scheme cxr) (scheme repl) (scheme write) (s3)) (begin {}))",
+        "(define-library (s3 compiler) (export expand expand-program codegen eval-form load-library dis-form) (import (scheme base) (scheme cxr) (scheme repl) (scheme write) (s3)) (begin {}))",
         COMPILER_FILES.join("\n")
     )
 }
@@ -271,33 +271,94 @@ impl Session {
     /// Compile one top-level form, printing its AST and code for
     /// `--expand` and `--dis`.
     fn compile(&mut self, datum: Value) -> Result<GcRef, String> {
-        let Some((expand, codegen)) = self.scheme else {
+        let Some((expand, _)) = self.scheme else {
             return Err("the compiler isn't loaded".into());
         };
         let env = Value::obj(self.env);
         // Each call holds its arguments, so they survive its collections.
-        let compiled = self.vm.call(&mut self.heap, expand, &[datum, env]).and_then(|ast| {
-            if self.expand {
-                let shown = compile::data::datum_to_expr(ast).map(|e| compile::ast::show(&e))?;
-                io::write_stdout(&self.heap, &format!("{}\n", shown));
-            }
-            self.vm.call(&mut self.heap, codegen, &[ast])
-        });
+        match self.vm.call(&mut self.heap, expand, &[datum, env]) {
+            Ok(ast) => self.codegen(ast),
+            Err(e) => Err(self.compile_failed(e)),
+        }
+    }
+
+    /// The template for an expanded form, `ast`.
+    fn codegen(&mut self, ast: Value) -> Result<GcRef, String> {
+        let (_, codegen) = self.scheme.unwrap();
+        let compiled = if self.expand {
+            compile::data::datum_to_expr(ast).map(|e| io::write_stdout(&self.heap, &format!("{}\n", compile::ast::show(&e))))
+        } else {
+            Ok(())
+        }
+        .and_then(|()| self.vm.call(&mut self.heap, codegen, &[ast]));
         let template = match compiled {
             Ok(t) if matches!(t.as_obj().map(|o| &o.kind), Some(heap::Obj::Template(_))) => t.as_ref().unwrap(),
             Ok(t) => return Err(format!("the compiler in Scheme returned {}", printer::print_value(t))),
-            Err(e) => {
-                // A compile error is reported without the compiler's own
-                // procedures as a backtrace.
-                self.vm.backtrace.clear();
-                libraries::Libraries::abandon_compiles(&mut self.heap);
-                return Err(e);
-            }
+            Err(e) => return Err(self.compile_failed(e)),
         };
         if self.dis {
             io::write_stdout(&self.heap, &compile::disasm::disassemble(template));
         }
         Ok(template)
+    }
+
+    /// A compile error, reported without the compiler's own procedures as
+    /// a backtrace.
+    fn compile_failed(&mut self, e: String) -> String {
+        self.vm.backtrace.clear();
+        libraries::Libraries::abandon_compiles(&mut self.heap);
+        e
+    }
+
+    /// Compile a program's forms, expanded as one body so that its small
+    /// procedures can be inlined (`expand-program`): each form's template,
+    /// and whether it is a `define-library`, which has run already.
+    fn compile_program(&mut self, forms: &[Value]) -> Result<Vec<(GcRef, bool)>, String> {
+        let expand_program = self.library_procedure(&["s3", "compiler"], "expand-program");
+        let pinned = self.heap.pinned.len();
+        let list = self.heap.list(forms.to_vec());
+        self.heap.pinned.push(list);
+        let result = match self.vm.call(&mut self.heap, expand_program, &[list, Value::obj(self.env)]) {
+            Ok(asts) => {
+                self.heap.pinned.push(asts);
+                let asts = heap::list_to_vec(asts).unwrap();
+                asts.iter()
+                    .zip(forms)
+                    .map(|(&ast, &form)| {
+                        let t = self.codegen(ast)?;
+                        self.heap.pinned.push(Value::obj(t));
+                        Ok((t, self.is_form(form, "define-library")))
+                    })
+                    .collect()
+            }
+            Err(e) => Err(self.compile_failed(e)),
+        };
+        self.heap.pinned.truncate(pinned);
+        result
+    }
+
+    /// Whether `datum` is a list that starts with the symbol `keyword`.
+    fn is_form(&mut self, datum: Value, keyword: &str) -> bool {
+        let head = heap::list_to_vec(datum).and_then(|f| f.first().copied());
+        head.is_some_and(|h| h.eq(self.heap.intern(keyword)))
+    }
+
+    /// The forms of a program that starts with an import declaration
+    /// (R7RS 5.1), all read, as it is compiled as one body; of any other,
+    /// only the first (or none), so that a script's forms are read as they
+    /// run, as at the REPL.
+    fn read_program(&mut self, port: &mut PortKind) -> Result<Vec<Value>, String> {
+        let mut forms = Vec::new();
+        loop {
+            match parse(&mut self.heap, port) {
+                Ok(datum) => forms.push(datum),
+                Err(ParseError::Eof) => return Ok(forms),
+                Err(ParseError::Syntax(msg)) => return Err(msg),
+            }
+            if !self.is_form(forms[0], "import") {
+                return Ok(forms);
+            }
+        }
     }
 
     /// `(%load-library "path")`, written in Scheme (scheme/core.scm).
@@ -381,16 +442,23 @@ impl Session {
             }
         } else {
             let mut port = io::new_string_port_input(&program_text(bytes));
-            loop {
-                let result = match parse(&mut self.heap, &mut port) {
-                    Ok(datum) => self.eval(datum),
-                    Err(ParseError::Eof) => break,
-                    Err(ParseError::Syntax(msg)) => Err(msg),
-                };
-                if let Err(msg) = result {
-                    self.report(&msg);
-                    self.exit(EXIT_ERROR);
+            let result = self.read_program(&mut port).and_then(|forms| match forms.first() {
+                Some(&first) if self.is_form(first, "import") => {
+                    let templates = self.compile_program(&forms)?;
+                    // Its libraries have run already.
+                    self.run_templates(&templates.into_iter().filter(|&(_, library)| !library).map(|(t, _)| t).collect::<Vec<_>>())
                 }
+                _ => forms.into_iter().try_for_each(|datum| self.eval(datum).map(|_| ())).and_then(|()| loop {
+                    match parse(&mut self.heap, &mut port) {
+                        Ok(datum) => self.eval(datum)?,
+                        Err(ParseError::Eof) => break Ok(()),
+                        Err(ParseError::Syntax(msg)) => break Err(msg),
+                    };
+                }),
+            });
+            if let Err(msg) = result {
+                self.report(&msg);
+                self.exit(EXIT_ERROR);
             }
         }
         self.exit(0)
@@ -426,30 +494,30 @@ impl Session {
         let mut port = io::new_string_port_input(&program_text(bytes));
         env_of(self.env).borrow_mut().touched = Some(Vec::new());
         let pinned = self.heap.pinned.len();
-        let mut templates = Vec::new();
-        let result = loop {
-            let datum = match parse(&mut self.heap, &mut port) {
-                Ok(datum) => datum,
-                Err(ParseError::Eof) => break fasl::write(&self.heap, self.env, &templates, &[file.into()]),
-                Err(ParseError::Syntax(msg)) => break Err(msg),
-            };
-            match self.compile(datum) {
-                Ok(t) => {
-                    self.heap.pinned.push(Value::obj(t));
-                    templates.push(t);
-                    // A library the program defines is registered now, so the
-                    // forms after it can import it, as one loaded from a file
-                    // would be.
-                    let head = heap::list_to_vec(datum).and_then(|f| f.first().copied());
-                    if head.is_some_and(|h| h.eq(self.heap.intern("define-library")))
-                        && let Err(e) = self.vm.run(&mut self.heap, t)
-                    {
-                        break Err(e);
-                    }
-                }
-                Err(e) => break Err(e),
+        let result = self.read_program(&mut port).and_then(|forms| {
+            if forms.first().is_some_and(|&first| self.is_form(first, "import")) {
+                let templates: Vec<GcRef> = self.compile_program(&forms)?.into_iter().map(|(t, _)| t).collect();
+                return fasl::write(&self.heap, self.env, &templates, &[file.into()]);
             }
-        };
+            let mut forms = forms.into_iter();
+            let mut templates = Vec::new();
+            loop {
+                let datum = match forms.next().map_or_else(|| parse(&mut self.heap, &mut port), Ok) {
+                    Ok(datum) => datum,
+                    Err(ParseError::Eof) => break fasl::write(&self.heap, self.env, &templates, &[file.into()]),
+                    Err(ParseError::Syntax(msg)) => break Err(msg),
+                };
+                let t = self.compile(datum)?;
+                self.heap.pinned.push(Value::obj(t));
+                templates.push(t);
+                // A library the program defines is registered now, so the
+                // forms after it can import it, as one loaded from a file
+                // would be.
+                if self.is_form(datum, "define-library") {
+                    self.vm.run(&mut self.heap, t)?;
+                }
+            }
+        });
         self.heap.pinned.truncate(pinned);
         env_of(self.env).borrow_mut().touched = None;
         result

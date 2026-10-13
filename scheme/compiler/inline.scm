@@ -1,17 +1,20 @@
-;;; Inlining within a library (plan/09, S1 step 3).
+;;; Inlining within a library or a program (plan/09, S1 step 3).
 ;;;
-;;; A library's body is expanded as one form, so its whole AST is known
-;;; at once. A variable it defines exactly once and never assigns has the
-;;; same value from its definition on: nothing outside can assign it, as
-;;; an import can't be assigned. If that value is a small procedure, its
-;;; calls in the body with the right number of arguments are replaced by
-;;; its body, in a let binding fresh copies of its parameters.
+;;; A library's body is expanded as one form, and so is a program's
+;;; (expand-program), so its whole AST is known at once. A variable it
+;;; defines exactly once and never assigns has the same value from its
+;;; definition on: nothing outside can assign it, as an import can't be
+;;; assigned. If that value is a small procedure, its calls in the body
+;;; with the right number of arguments are replaced by its body, in a let
+;;; binding fresh copies of its parameters.
 ;;;
 ;;; The procedure is still defined, for its other uses and its exports.
 ;;; Two things change, both only for programs that are wrong already or
 ;;; for errors: an inlined procedure called before its definition has run
 ;;; runs instead of failing as unbound, and an error inside it has no
-;;; frame of its own in the backtrace.
+;;; frame of its own in the backtrace. And a program that redefines one
+;;; of its procedures through eval or load changes only the calls that
+;;; weren't inlined.
 ;;;
 ;;; A macro the library defines could expand, in an importer's code
 ;;; compiled later, into an assignment of the library's variables. So if
@@ -20,10 +23,10 @@
 ;; The most nodes an inlined procedure's body has.
 (define max-inline-size 8)
 
-;; The library body's nodes, with calls inlined. `macros` are those its
-;; body defined; `lib` its environment.
-(define (inline-library x body macros lib)
-  (if (any? (lambda (m) (assigns? x m lib)) macros)
+;; The body's nodes, with calls inlined. `macros` are those the body
+;; defined, and `env` its environment.
+(define (inline-body x body macros env)
+  (if (any? (lambda (m) (assigns? x m env)) macros)
       body
       (let* ((found (inlinable-procedures body))
              (procs (car found)))
@@ -32,14 +35,14 @@
             (map-in-order (lambda (e) (inline-calls x e procs (cdr found) '())) body)))))
 
 ;; Whether a macro's templates name set!, as the library sees it.
-(define (assigns? x m lib)
-  (let ((set-b (resolve-in x 'set! 0 lib)))
+(define (assigns? x m env)
+  (let ((set-b (resolve-in x 'set! 0 env)))
     (define (scan t)
       (let ((tag (vector-ref t 0)))
         (cond ((eq? tag 'ident)
                (let ((id (vector-ref t 1)))
                  (or (eq? (strip id) 'set!)
-                     (same-binding? set-b (resolve-in x id 0 lib)))))
+                     (same-binding? set-b (resolve-in x id 0 env)))))
               ((eq? tag 'list) (or (any? scan (vector-ref t 1)) (scan (vector-ref t 2))))
               ((eq? tag 'vec) (any? scan (vector-ref t 1)))
               ((eq? tag 'rep) (scan (vector-ref t 1)))

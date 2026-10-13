@@ -16,7 +16,12 @@ and the same file without its first line both work. `import` is still useful for
 
 Run a program with `s3 program.scm [arg ...]`. It exits when the last form has been evaluated, or when it calls `exit`. See [System Interface](./system-interface.md#running-s3).
 
-Each top-level form is expanded and compiled as a whole, then run, before the next form is read. So a macro defined by one form can be used by the next, and a definition is visible to every later form.
+A file without the `import` runs as a script, as the REPL does: each top-level form is expanded and compiled as a whole, then run, before the next form is read. So a macro defined by one form can be used by the next, and a definition is visible to every later form.
+
+A file that starts with `import` is an R7RS program, and s3 reads and compiles all of it before running any of it. Macros and definitions are visible to the forms after them, as in a script, and a `define-library` in the file is registered when it is reached, so later forms can import it. Two things differ:
+
+* A syntax error anywhere in the file stops the program before any of it runs.
+* Small procedures the program defines once and never assigns are *inlined*: a call to one is replaced by its body, as s3 also does inside a library. A program that redefines one of them while it runs, through `eval` or `load`, changes only the calls that weren't inlined.
 
 ## Definitions
 
