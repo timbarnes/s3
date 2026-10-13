@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run ecraven's R7RS benchmarks (github.com/ecraven/r7rs-benchmarks) on s2,
+# Run ecraven's R7RS benchmarks (github.com/ecraven/r7rs-benchmarks) on s3,
 # s1 and other Schemes, on this machine (plan/04 P12).
 #
 #   bench/r7rs/run.sh [-n ROUNDS] [-s SCALE] [-t SECONDS] [SYSTEMS [BENCHMARKS]]
@@ -8,9 +8,9 @@
 #               systems take turns, and the summary shows medians
 #   -s SCALE    divide each benchmark's iteration count by SCALE (default
 #               10; at least one iteration). The inputs are sized for about
-#               a second on a native-code Scheme, a minute on s2
+#               a second on a native-code Scheme, a minute on s3
 #   -t SECONDS  time limit per run (default 300)
-#   SYSTEMS     "s2 s1 chibi ..." (default: all of them)
+#   SYSTEMS     "s3 s1 chibi ..." (default: all of them)
 #   BENCHMARKS  "fib tak ..." (default: all of them)
 #
 # Each benchmark times itself, inside the process: startup and compiling
@@ -41,7 +41,7 @@ while getopts "n:s:t:" opt; do
 done
 shift $((OPTIND - 1))
 
-all_systems="s2 s1 chibi guile gauche s7 chicken gambit chez racket"
+all_systems="s3 s1 chibi guile gauche s7 chicken gambit chez racket"
 # The suite's list (its `bench` script), in its order.
 all_benchmarks="browse deriv destruc diviter divrec puzzle triangl tak takl ntakl cpstak ctak
     fib fibc fibfp sum sumfp fft mbrot mbrotZ nucleic pi pnpoly ray simplex
@@ -56,11 +56,11 @@ if [[ ! -d "$suite" ]]; then
     git clone -q https://github.com/ecraven/r7rs-benchmarks.git "$suite" || exit 1
 fi
 git -C "$suite" checkout -q "$suite_commit" || exit 1
-if [[ " $systems " == *" s2 "* ]]; then
+if [[ " $systems " == *" s3 "* ]]; then
     (cd "$root" && cargo build --release -q) || exit 1
 fi
 
-S2="$root/target/release/s2"
+S3="$root/target/release/s3"
 S1="${S1:-$root/../s1/target/release/s1}"
 S7="${S7:-s7}"
 CHEZ_LIBS="$here/chez"
@@ -72,7 +72,7 @@ mkdir -p "$work"
 # The prelude and postlude of each system, before and after the benchmark.
 prelude() {
     case $1 in
-        s2 | s1) echo "$here/name.scm" ;;
+        s3 | s1) echo "$here/name.scm" ;;
         chibi) echo "$suite/src/Chibi-prelude.scm" ;;
         guile) echo "$suite/src/Guile3-prelude.scm" ;;
         s7) echo "$suite/src/S7-prelude.scm" ;;
@@ -108,7 +108,7 @@ compile() {
 run() {
     local sys=$1 f=$2
     case $sys in
-        s2) "$S2" "$f.scm" ;;
+        s3) "$S3" "$f.scm" ;;
         s1) "$S1" -q "$f.scm" ;;
         chibi) chibi-scheme "$f.scm" ;;
         guile) GC_INITIAL_HEAP_SIZE=100000000 guile "$f.scm" ;;
@@ -139,7 +139,7 @@ for b in $benchmarks; do
             grep -q "^$sys,$b,0,COMPILEERROR" "$csv" && continue
             # Each command runs in the suite's directory, which the
             # benchmarks' file names are relative to.
-            $timeout_cmd "$limit" bash -c "$(declare -f run); work='$work' S1='$S1' S2='$S2' S7='$S7' CHEZ_LIBS='$CHEZ_LIBS' run $sys '$f'" \
+            $timeout_cmd "$limit" bash -c "$(declare -f run); work='$work' S1='$S1' S3='$S3' S7='$S7' CHEZ_LIBS='$CHEZ_LIBS' run $sys '$f'" \
                 < "$work/$b.input" > "$f.out" 2>&1
             status=$?
             result=$(sed -n 's/^+!CSVLINE!+[^,]*,[^,]*,//p' "$f.out" | tail -n 1)

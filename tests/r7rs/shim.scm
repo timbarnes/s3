@@ -1,5 +1,5 @@
 ;; shim.scm: a minimal stand-in for chibi's (chibi test) library, so that the
-;; vendored R7RS conformance suite (r7rs-tests.scm) can run on s2. Forked
+;; vendored R7RS conformance suite (r7rs-tests.scm) can run on s3. Forked
 ;; from s1's shim, rewritten with syntax-rules (s1's uses its `macro`).
 ;;
 ;; Counting: every test bumps %r7rs-attempted before its expression is

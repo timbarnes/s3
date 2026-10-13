@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Benchmarks. Usage:
-#   bench/bench.sh [reps]                    s1 against s2, every workload
-#   bench/bench.sh --compare OLD NEW [reps]  two s2 binaries, every workload
+#   bench/bench.sh [reps]                    s1 against s3, every workload
+#   bench/bench.sh --compare OLD NEW [reps]  two s3 binaries, every workload
 # Each workload is a file in bench/. Runs of the two binaries alternate, so
 # machine noise (large on a laptop) hits both alike; the table shows
 # medians and their ratio. Only ratios should be compared across sessions.
@@ -15,7 +15,7 @@ if [[ "${1:-}" == "--compare" ]]; then
 else
   REPS=${1:-7}
   cargo build --release >/dev/null 2>&1 || { echo "build failed"; exit 1; }
-  A=(${S1_BIN:-../s1/target/release/s1} -q); B=(target/release/s2); LA=s1; LB=s2
+  A=(${S1_BIN:-../s1/target/release/s1} -q); B=(target/release/s3); LA=s1; LB=s3
 fi
 W=$(mktemp -d)
 trap 'rm -rf "$W"' EXIT

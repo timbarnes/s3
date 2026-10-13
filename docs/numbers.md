@@ -2,7 +2,7 @@
 
 R7RS: [section 6.2, Numbers](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-8.html#TAG:__tex2page_sec_6.2).
 
-s2 implements the R7RS numeric tower without complex numbers. A number is one of:
+s3 implements the R7RS numeric tower without complex numbers. A number is one of:
 
 * an **exact integer** of any size (`42`, `-12345678901234567890`)
 * an **exact rational** that isn't an integer, always in lowest terms (`1/2`, `-7/3`)

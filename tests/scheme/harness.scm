@@ -1,7 +1,7 @@
 ;; harness.scm: s1's test procedures (scheme/test-harness.scm: test-equal,
 ;; test-true and the rest), for the ported s1 test files, which
 ;; tests/scheme.rs runs each one after this. Only the reporting differs. A failing test prints a FAIL line; an error
-;; in a test aborts its top-level form, which s2 reports on stderr.
+;; in a test aborts its top-level form, which s3 reports on stderr.
 
 ;; The size of a test's long loop or deep recursion. tests/scheme.rs caps
 ;; it under GC stress, where every call collects and big sizes take hours.

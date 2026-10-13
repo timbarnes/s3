@@ -2,7 +2,7 @@
 
 R7RS: [section 4.3, Macros](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-6.html#TAG:__tex2page_sec_4.3). Syntax definitions are in [section 5.4](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-7.html#TAG:__tex2page_sec_5.4).
 
-s2 has one macro system, R7RS's `syntax-rules`: pattern-based and **hygienic**. Hygiene is implemented by renaming: identifiers a template introduces become *aliases* that remember where the macro was defined.
+s3 has one macro system, R7RS's `syntax-rules`: pattern-based and **hygienic**. Hygiene is implemented by renaming: identifiers a template introduces become *aliases* that remember where the macro was defined.
 
 Macros are expanded when a top-level form is compiled, before any of it runs. So a macro must be defined by an earlier top-level form than its uses (or earlier in the same body), and every use in a form is expanded, whether that code ever runs or not. Macros aren't values: using a macro's name as an expression is an error.
 
@@ -87,11 +87,11 @@ A macro costs nothing at run time: each use is expanded once, when its form is c
 
 ## Inspecting expansions
 
-`s2 --expand` prints each top-level form after full expansion, as the core forms the compiler sees, before running it. Renamed identifiers print with a number after their name, so two different `tmp`s can be told apart:
+`s3 --expand` prints each top-level form after full expansion, as the core forms the compiler sees, before running it. Renamed identifiers print with a number after their name, so two different `tmp`s can be told apart:
 
 ```
-$ s2 --expand -e '(let loop ((i 0)) (if (< i 3) (loop (+ i 1))))'
+$ s3 --expand -e '(let loop ((i 0)) (if (< i 3) (loop (+ i 1))))'
 ((letrec* ((loop.1 (named-lambda (loop i.2) (if (< i.2 3) (loop.1 (+ i.2 1)) #<unspecified>)))) loop.1) 0)
 ```
 
-`--dis` prints the bytecode each form compiles to, and `(dis 'datum)` (an s2 extension) prints what `datum` would compile to, without running it: `(dis '(lambda (x) (+ x 1)))`.
+`--dis` prints the bytecode each form compiles to, and `(dis 'datum)` (an s3 extension) prints what `datum` would compile to, without running it: `(dis '(lambda (x) (+ x 1)))`.

@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Run the vendored R7RS conformance suite (chibi-scheme's r7rs-tests.scm)
-# against s2 and compare the pass counts with baseline.txt. Forked from s1.
+# against s3 and compare the pass counts with baseline.txt. Forked from s1.
 #
 #   tests/r7rs/run.sh             run, print the table, exit 1 if any
 #                                 section passes fewer tests than the baseline
 #   tests/r7rs/run.sh --update    run and overwrite baseline.txt
 #
 # The suite is split at each top-level (test-begin "...") and every section
-# runs in its own s2 process, so a reader desync or crash in one section
+# runs in its own s3 process, so a reader desync or crash in one section
 # cannot swallow the sections after it. Full output goes to last-run.log.
 #
-# Set S2_BIN to test a prebuilt binary; otherwise a release build is made.
+# Set S3_BIN to test a prebuilt binary; otherwise a release build is made.
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ suite="$here/r7rs-tests.scm"
 shim="$here/shim.scm"
 baseline="$here/baseline.txt"
 log="$here/last-run.log"
-timeout_secs="${S2_TIMEOUT:-15}"  # per section; the whole suite takes ~1s
+timeout_secs="${S3_TIMEOUT:-15}"  # per section; the whole suite takes ~1s
 
 update=0
 case "${1:-}" in
@@ -31,12 +31,12 @@ case "${1:-}" in
     *) echo "usage: $0 [--update]" >&2; exit 2 ;;
 esac
 
-if [[ -z "${S2_BIN:-}" ]]; then
+if [[ -z "${S3_BIN:-}" ]]; then
     if ! build_log="$(cargo build --release 2>&1)"; then
         printf '%s\n' "$build_log" >&2
         exit 1
     fi
-    S2_BIN="$root/target/release/s2"
+    S3_BIN="$root/target/release/s3"
 fi
 
 # GNU timeout, or gtimeout (Homebrew coreutils) on macOS; without either,
@@ -92,11 +92,11 @@ for f in "$work"/section-*.scm; do
     expected="$(expected_tests "$f")"
     echo ";;;; ==== $name" >> "$log"
     status=0
-    # s2 loads one file, so the header, shim, section and summary call are
+    # s3 loads one file, so the header, shim, section and summary call are
     # put together. With -f an error is reported and the next form runs;
-    # s2 then exits 1, which is expected.
+    # s3 then exits 1, which is expected.
     cat "$work/header.scm" "$shim" "$f" "$work/summary.scm" > "$work/run.scm"
-    out="$(with_timeout "$S2_BIN" -f "$work/run.scm" 2>&1 </dev/null)" || status=$?
+    out="$(with_timeout "$S3_BIN" -f "$work/run.scm" 2>&1 </dev/null)" || status=$?
     printf '%s\n' "$out" >> "$log"
 
     summary="$(printf '%s\n' "$out" | grep '^SUMMARY ' | tail -n 1 || true)"
@@ -133,7 +133,7 @@ table
 
 if [[ $update -eq 1 ]]; then
     {
-        echo "# R7RS conformance baseline for s2 -- regenerate with tests/r7rs/run.sh --update"
+        echo "# R7RS conformance baseline for s3 -- regenerate with tests/r7rs/run.sh --update"
         echo "# Columns: section, pass, fail, error, attempted, ~total (static estimate), note"
         cat "$results"
     } > "$baseline"

@@ -1,6 +1,6 @@
 # Lexical Syntax
 
-How s2 reads source text. R7RS: [chapter 2, Lexical conventions](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-4.html#TAG:__tex2page_chap_2), and the formal grammar in [section 7.1.1](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-9.html#TAG:__tex2page_sec_7.1.1).
+How s3 reads source text. R7RS: [chapter 2, Lexical conventions](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-4.html#TAG:__tex2page_chap_2), and the formal grammar in [section 7.1.1](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-9.html#TAG:__tex2page_sec_7.1.1).
 
 ## Identifiers
 
@@ -25,7 +25,7 @@ Identifiers are case sensitive: `Hello` and `hello` are different. Besides lette
 * `;` comments out the rest of the line.
 * `#| ... |#` is a block comment. Block comments nest.
 * `#;` comments out the next datum, however many lines it spans: `(a #;(b c) d)` reads as `(a d)`.
-* A line beginning `#!/` or `#! ` is a comment, so a script can start with `#!/usr/bin/env s2` (see [System Interface](./system-interface.md#running-s2)).
+* A line beginning `#!/` or `#! ` is a comment, so a script can start with `#!/usr/bin/env s3` (see [System Interface](./system-interface.md#running-s3)).
 
 ## Literals
 
@@ -56,7 +56,7 @@ Numbers, strings, characters, booleans, vectors and bytevectors evaluate to them
 
 `write` uses the same notation when it prints cyclic data, so it always terminates. See [Input and Output](./input-and-output.md#output).
 
-## s2 differences
+## s3 differences
 
-* Square brackets are read as a vector: `[a b c]` is the same as `#(a b c)`, as in s1. In most Schemes, square brackets are an alternative to parentheses; in s2 they are not.
+* Square brackets are read as a vector: `[a b c]` is the same as `#(a b c)`, as in s1. In most Schemes, square brackets are an alternative to parentheses; in s3 they are not.
 * Complex numbers such as `1+2i` are rejected by the reader (see [Numbers](./numbers.md)).

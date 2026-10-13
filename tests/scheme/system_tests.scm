@@ -1,4 +1,4 @@
-;; Ported from s1's scheme/system_tests.scm, with s2's wording of a type
+;; Ported from s1's scheme/system_tests.scm, with s3's wording of a type
 ;; error.
 
 ;; system_tests.scm: R7RS 6.14, (scheme process-context) and (scheme time).

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # summary.sh RESULTS.CSV "SYSTEMS": a Markdown table of each benchmark's
-# median time on each system, and each system's time relative to s2:
+# median time on each system, and each system's time relative to s3:
 # the geometric mean, over the benchmarks both completed, of its time
-# divided by s2's (below 1 is faster than s2).
+# divided by s3's (below 1 is faster than s3).
 awk -F, -v systems="$2" '
 NR == 1 { next }
 $3 == 0 { status[$1, $2] = $4; next }
@@ -30,12 +30,12 @@ END {
         print ""
     }
     print ""
-    print "| relative to s2 (geometric mean) | benchmarks |"
+    print "| relative to s3 (geometric mean) | benchmarks |"
     print "|---|---:|"
     for (s = 1; s <= ns; s++) {
         sum = 0; n = 0
         for (b = 1; b <= nb; b++) {
-            k = sys[s] SUBSEP order[b]; k2 = "s2" SUBSEP order[b]
+            k = sys[s] SUBSEP order[b]; k2 = "s3" SUBSEP order[b]
             if ((k in m) && (k2 in m) && m[k] > 0 && m[k2] > 0) { sum += log(m[k] / m[k2]); n++ }
         }
         if (n) printf "| %s | %.3f | %d |\n", sys[s], exp(sum / n), n

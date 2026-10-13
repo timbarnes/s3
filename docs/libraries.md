@@ -2,14 +2,14 @@
 
 R7RS: [section 5.2, Import declarations](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-7.html#TAG:__tex2page_sec_5.2), [section 5.6, Libraries](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-7.html#TAG:__tex2page_sec_5.6), `cond-expand` in [section 4.2.1](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-6.html#TAG:__tex2page_sec_4.2.1), and the lists of [standard libraries](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-10.html#TAG:__tex2page_chap_A) and [feature identifiers](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-11.html#TAG:__tex2page_chap_B) in appendices A and B.
 
-Programs run in the interaction environment, which already has every standard binding (see [Environments and Evaluation](./environments.md)), so a program needs `import` only for its own libraries or to rename. A program that starts with the usual R7RS `(import (scheme base) ...)` runs unchanged. The design is in [P8](https://github.com/timbarnes/s2/blob/main/plan/phases/P8.md) and [P11](https://github.com/timbarnes/s2/blob/main/plan/phases/P11.md).
+Programs run in the interaction environment, which already has every standard binding (see [Environments and Evaluation](./environments.md)), so a program needs `import` only for its own libraries or to rename. A program that starts with the usual R7RS `(import (scheme base) ...)` runs unchanged. The design is in [P8](https://github.com/timbarnes/s3/blob/main/plan/phases/P8.md) and [P11](https://github.com/timbarnes/s3/blob/main/plan/phases/P11.md).
 
 ## Standard libraries
 
-The R7RS standard libraries exist as export lists over the system environment: `(scheme base)`, `(scheme case-lambda)`, `(scheme char)`, `(scheme complex)`, `(scheme cxr)`, `(scheme eval)`, `(scheme file)`, `(scheme inexact)`, `(scheme lazy)`, `(scheme load)`, `(scheme process-context)`, `(scheme read)`, `(scheme repl)`, `(scheme time)`, `(scheme write)` and `(scheme r5rs)`. Names a library should export but s2 doesn't define are left out: only the complex-number procedures of `(scheme complex)` and `(scheme r5rs)`. `(%library-unimplemented library-name)` lists them. `(s2)` exports everything else in the system environment: s2's extensions and its internal procedures.
+The R7RS standard libraries exist as export lists over the system environment: `(scheme base)`, `(scheme case-lambda)`, `(scheme char)`, `(scheme complex)`, `(scheme cxr)`, `(scheme eval)`, `(scheme file)`, `(scheme inexact)`, `(scheme lazy)`, `(scheme load)`, `(scheme process-context)`, `(scheme read)`, `(scheme repl)`, `(scheme time)`, `(scheme write)` and `(scheme r5rs)`. Names a library should export but s3 doesn't define are left out: only the complex-number procedures of `(scheme complex)` and `(scheme r5rs)`. `(%library-unimplemented library-name)` lists them. `(s3)` exports everything else in the system environment: s3's extensions and its internal procedures.
 
-* `(library-names)`: the registered libraries' names, such as `(scheme base)`. An s2 extension.
-* `(library-exports library-name)`: the names a library exports, as a list of symbols. An s2 extension.
+* `(library-names)`: the registered libraries' names, such as `(scheme base)`. An s3 extension.
+* `(library-exports library-name)`: the names a library exports, as a list of symbols. An s3 extension.
 
 ## `import`
 
@@ -70,15 +70,15 @@ count                 ; => 1: importers see the library's assignments
 
 ## Library files
 
-When `import` (or a library's `import` declaration) names a library that isn't registered, s2 looks for a file named after it: the name's parts joined by `/`, with `.sld` added, so `(foo bar)` is `foo/bar.sld`. It searches, in order:
+When `import` (or a library's `import` declaration) names a library that isn't registered, s3 looks for a file named after it: the name's parts joined by `/`, with `.sld` added, so `(foo bar)` is `foo/bar.sld`. It searches, in order:
 
-1. the directories in the environment variable `S2_LIBRARY_PATH`, separated as in `PATH` (by colons on Linux and macOS, semicolons on Windows);
+1. the directories in the environment variable `S3_LIBRARY_PATH`, separated as in `PATH` (by colons on Linux and macOS, semicolons on Windows);
 2. the current directory;
-3. the installation's library directory: `share/s2/lib` under the prefix s2 is installed in (`/usr/local/share/s2/lib` for `/usr/local/bin/s2`).
+3. the installation's library directory: `share/s3/lib` under the prefix s3 is installed in (`/usr/local/share/s3/lib` for `/usr/local/bin/s3`).
 
 The first file found is loaded in the interaction environment, normally defining the library with `define-library`, and the import goes ahead. A library file may itself import libraries from files.
 
-**Compiled library files.** Loading `foo/bar.sld` compiles it and writes the result beside it, as `foo/bar.s2o`. Later runs load that file instead of compiling again, as long as it is *fresh*: `foo/bar.sld`, and every file it `include`s, still has the modification time it had when it was compiled, and the running s2 was built before the file was written. Otherwise the library is compiled again. Caching is best effort: if the `.s2o` file can't be written, s2 compiles the library on every run. A library file that can't be compiled ahead (one whose second `define-library` imports its first) is evaluated form by form instead.
+**Compiled library files.** Loading `foo/bar.sld` compiles it and writes the result beside it, as `foo/bar.s3o`. Later runs load that file instead of compiling again, as long as it is *fresh*: `foo/bar.sld`, and every file it `include`s, still has the modification time it had when it was compiled, and the running s3 was built before the file was written. Otherwise the library is compiled again. Caching is best effort: if the `.s3o` file can't be written, s3 compiles the library on every run. A library file that can't be compiled ahead (one whose second `define-library` imports its first) is evaluated form by form instead.
 
 Each file is loaded at most once per run. If it doesn't define the library its name implies, the import is an error (`import: ./foo/bar.sld does not define (foo bar)`), and importing again gives the same error without reloading. After fixing such a file, `(load "foo/bar.sld")` loads it again. `environment` uses only registered libraries; it doesn't search for files.
 
@@ -98,8 +98,8 @@ Evaluates the forms of the first clause whose requirement holds, in place of the
 
 ```scheme
 (cond-expand
-  ((and s2 (library (scheme char))) (define upcase char-upcase))
+  ((and s3 (library (scheme char))) (define upcase char-upcase))
   (else (define (upcase c) c)))
 ```
 
-`(features)` returns s2's feature identifiers: `r7rs`, `exact-closed`, `ieee-float`, `full-unicode`, `ratios`, `s2`, and the operating system, its family, the architecture and the byte order, for example `macos unix posix aarch64 little-endian`. `full-unicode` is present: characters are Unicode scalar values, strings hold any of them, and the case, character-class and digit procedures follow Unicode. `exact-complex` is absent, since s2 has no complex numbers.
+`(features)` returns s3's feature identifiers: `r7rs`, `exact-closed`, `ieee-float`, `full-unicode`, `ratios`, `s3`, and the operating system, its family, the architecture and the byte order, for example `macos unix posix aarch64 little-endian`. `full-unicode` is present: characters are Unicode scalar values, strings hold any of them, and the case, character-class and digit procedures follow Unicode. `exact-complex` is absent, since s3 has no complex numbers.

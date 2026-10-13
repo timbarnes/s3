@@ -1,4 +1,4 @@
-;;; Analysis over the core AST, as src/compile/analyze.rs does it:
+;;; Analysis over the core AST, as s2's src/compile/analyze.rs did it:
 ;;;
 ;;; - the free variables of each lambda, the values its flat closure copies;
 ;;; - which variables need boxes;
@@ -48,7 +48,7 @@
                  (not (memv (var-id (binding-var b)) boxed))))
           bindings))
 
-;; The variables that live in a box (see analyze.rs for why): those
+;; The variables that live in a box (plan/03 §7): those
 ;; assigned with set!, and letrec variables referenced before their init
 ;; has run, outside lambda groups.
 (define (boxed-variables e)

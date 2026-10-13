@@ -1,4 +1,4 @@
-;;; Code generation: core AST to templates, as src/compile/codegen.rs does
+;;; Code generation: core AST to templates, as s2's src/compile/codegen.rs did
 ;;; it, instruction for instruction (plan/08, C7).
 ;;;
 ;;; A post-order walk. Each expression's code leaves exactly one value on

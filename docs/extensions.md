@@ -1,10 +1,10 @@
-# s2 Extensions
+# s3 Extensions
 
-What s2 provides beyond R7RS-small. It is deliberately little: s2 is a small, standard core. The library `(s2)` exports these, so a library can `(import (s2))` to use them. A portable program should avoid them, or test for s2 with [`cond-expand`](./libraries.md#cond-expand-and-features) (`s2` is one of its features).
+What s3 provides beyond R7RS-small. It is deliberately little: s3 is a small, standard core. The library `(s3)` exports these, so a library can `(import (s3))` to use them. A portable program should avoid them, or test for s3 with [`cond-expand`](./libraries.md#cond-expand-and-features) (`s3` is one of its features).
 
 ## Language
 
-* **Square brackets** read as a vector: `[1 2 3]` is `#(1 2 3)`. See [Lexical Syntax](./lexical-syntax.md#s2-differences).
+* **Square brackets** read as a vector: `[1 2 3]` is `#(1 2 3)`. See [Lexical Syntax](./lexical-syntax.md#s3-differences).
 * **Programs needn't start with `import`.** See [Program Structure](./program-structure.md#programs).
 
 ## Procedures
@@ -21,7 +21,7 @@ What s2 provides beyond R7RS-small. It is deliberately little: s2 is a small, st
 
 ## Debugging
 
-When an error isn't handled, s2 prints the names of the procedures that were waiting for a value, innermost first:
+When an error isn't handled, s3 prints the names of the procedures that were waiting for a value, innermost first:
 
 ```
 error: unbound variable: h
@@ -29,13 +29,13 @@ error: unbound variable: h
   in f
 ```
 
-There is no debugger, tracer or source location in errors yet. For a Scheme with those, see [s1](https://github.com/timbarnes/s1), whose debugger and tracer s2 doesn't share.
+There is no debugger, tracer or source location in errors yet. For a Scheme with those, see [s1](https://github.com/timbarnes/s1), whose debugger and tracer s3 doesn't share.
 
 ## Environment variables
 
-* `S2_LIBRARY_PATH`: directories to search for library files. See [Libraries](./libraries.md#library-files).
-* `S2_GC_STRESS=1` collects garbage at every safepoint, and `S2_GC_POISON=1` overwrites freed objects. Both are for testing s2 itself, and make it much slower.
+* `S3_LIBRARY_PATH`: directories to search for library files. See [Libraries](./libraries.md#library-files).
+* `S3_GC_STRESS=1` collects garbage at every safepoint, and `S3_GC_POISON=1` overwrites freed objects. Both are for testing s3 itself, and make it much slower.
 
 ## Internal procedures
 
-Names beginning with `%` (`%make-record-type`, `%frame-depth`, `%library-unimplemented`, ...) are the internal primitives that `scheme/core.scm`'s macros and procedures are built on. They are exported by `(s2)` but may change without notice.
+Names beginning with `%` (`%make-record-type`, `%frame-depth`, `%library-unimplemented`, ...) are the internal primitives that `scheme/core.scm`'s macros and procedures are built on. They are exported by `(s3)` but may change without notice.

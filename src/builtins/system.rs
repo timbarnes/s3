@@ -22,7 +22,7 @@ pub fn set_command_line(words: Vec<String>) {
 
 pub static PRIMITIVES: &[Primitive] = &[
     prim("command-line", 0, Some(0), |h, _| {
-        let words = COMMAND_LINE.get().cloned().unwrap_or_else(|| vec!["s2".to_string()]);
+        let words = COMMAND_LINE.get().cloned().unwrap_or_else(|| vec!["s3".to_string()]);
         let strings = words.iter().map(|w| h.string(w)).collect();
         Ok(h.list(strings))
     }),
@@ -50,7 +50,7 @@ pub static PRIMITIVES: &[Primitive] = &[
         let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| "current-second: the system clock is before 1970")?;
         Ok(Value::flonum(since_epoch.as_secs_f64()))
     }),
-    // Jiffies are nanoseconds since s2 started.
+    // Jiffies are nanoseconds since s3 started.
     prim("current-jiffy", 0, Some(0), |h, _| Ok(h.integer(START.elapsed().as_nanos().into()))),
     prim("jiffies-per-second", 0, Some(0), |_, _| Ok(Value::fixnum(1_000_000_000).unwrap())),
     // (%exit [obj]): end the process now, with standard output and file

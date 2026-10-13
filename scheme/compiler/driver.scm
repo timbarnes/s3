@@ -1,5 +1,5 @@
 ;;; The driver (plan/08, C6): compiling a form, eval, dis, and loading a
-;;; library file. With S2_COMPILER=scheme, s2 binds eval, dis and
+;;; library file. At startup, s3 binds eval, dis and
 ;;; %load-library to eval-form, dis-form and load-library, so every
 ;;; compile goes through here. Loading never has to wait: an import of a
 ;;; library whose file isn't loaded loads it there and then

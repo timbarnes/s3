@@ -1,6 +1,6 @@
 ;; exception_tests.scm: with-exception-handler, raise, error objects and
 ;; guard (R7RS 6.11, 4.2.7). Ported from s1's scheme/exception_tests.scm,
-;; with s2's error messages; guards nest 8,000 deep (the roadmap's figure).
+;; with s3's error messages; guards nest 8,000 deep (the roadmap's figure).
 ;; The test of an uncaught error is a unit test in src/main.rs, since this
 ;; runner treats any uncaught error as a failure.
 
@@ -62,7 +62,7 @@
 (test-equal '(#t ("/no/such/file"))
     (guard (e ((file-error? e) (list #t (error-object-irritants e)))) (open-input-file "/no/such/file"))
     "open-input-file failure is a file error naming the file")
-(define read-error-file "target/s2-read-error-test.tmp")
+(define read-error-file "target/s3-read-error-test.tmp")
 (let ((out (open-output-file read-error-file)))
   (display ")" out)
   (close-output-port out))

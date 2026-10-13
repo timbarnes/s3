@@ -1,17 +1,17 @@
-//! s2: a bytecode-compiled Scheme. See plan/ for the design.
+//! s3: a bytecode-compiled Scheme. See plan/ for the design.
 //!
 //! Usage:
 //!
 //! ```text
-//! s2 [FLAGS]                  REPL on standard input
-//! s2 [FLAGS] -e TEXT          evaluate each form in TEXT, writing each result
-//! s2 [FLAGS] -f FILE          evaluate each form in FILE; an error is
+//! s3 [FLAGS]                  REPL on standard input
+//! s3 [FLAGS] -e TEXT          evaluate each form in TEXT, writing each result
+//! s3 [FLAGS] -f FILE          evaluate each form in FILE; an error is
 //!                             reported and the next form runs
-//! s2 [FLAGS] PROGRAM ARG ...  run a program: the first error ends it, with
+//! s3 [FLAGS] PROGRAM ARG ...  run a program: the first error ends it, with
 //!                             status 70; (command-line) is PROGRAM ARG ...
 //!                             PROGRAM may be source or compiled
-//! s2 --compile FILE [-o OUT]  compile the program FILE to OUT (by default
-//!                             FILE with the extension .s2o), without
+//! s3 --compile FILE [-o OUT]  compile the program FILE to OUT (by default
+//!                             FILE with the extension .s3o), without
 //!                             running it
 //! ```
 //!
@@ -58,7 +58,12 @@ use value::Value;
 /// macros, compiled into the binary and loaded into every session.
 const CORE_SCM: &str = include_str!("../scheme/core.scm");
 
-/// The compiler in Scheme (plan/08), as the library `(s2 compiler)`: its
+/// The boot images (plan/09): `CORE_SCM` and the compiler, compiled by
+/// the compiler in Scheme. `scripts/rebuild-images.sh` remakes them.
+const CORE_IMAGE: &[u8] = include_bytes!("../boot/s3-core.s3o");
+const COMPILER_IMAGE: &[u8] = include_bytes!("../boot/s3-compiler.s3o");
+
+/// The compiler in Scheme (plan/08), as the library `(s3 compiler)`: its
 /// files, in order, form the library's body.
 const COMPILER_FILES: &[&str] = &[
     include_str!("../scheme/compiler/ast.scm"),
@@ -70,10 +75,10 @@ const COMPILER_FILES: &[&str] = &[
     include_str!("../scheme/compiler/driver.scm"),
 ];
 
-/// `(s2 compiler)`'s source: a `define-library` around `COMPILER_FILES`.
+/// `(s3 compiler)`'s source: a `define-library` around `COMPILER_FILES`.
 fn compiler_source() -> String {
     format!(
-        "(define-library (s2 compiler) (export expand codegen eval-form load-library dis-form) (import (scheme base) (scheme cxr) (scheme repl) (scheme write) (s2)) (begin {}))",
+        "(define-library (s3 compiler) (export expand codegen eval-form load-library dis-form) (import (scheme base) (scheme cxr) (scheme repl) (scheme write) (s3)) (begin {}))",
         COMPILER_FILES.join("\n")
     )
 }
@@ -87,8 +92,8 @@ struct Session {
     vm: vm::Vm,
     dis: bool,
     expand: bool,
-    /// The compiler in Scheme's `expand` and `codegen`, with
-    /// `S2_COMPILER=scheme`.
+    /// The compiler in Scheme's `expand` and `codegen`, once its image
+    /// has loaded.
     scheme: Option<(Value, Value)>,
 }
 
@@ -102,22 +107,20 @@ impl Session {
         heap.interaction = Some(system);
         let vm = vm::Vm::new(&mut heap);
         let mut s = Session { heap, env: system, vm, dis: false, expand: false, scheme: None };
-        s.load_image(CORE_SCM, "s2-core.s2o", "S2_CORE_IMAGE");
+        s.load_image(CORE_IMAGE, "S3_CORE_IMAGE");
         libraries::register_standard_libraries(&mut s.heap, system);
-        if compile::compiler() == compile::Compiler::Scheme {
-            s.load_image(&compiler_source(), "s2-compiler.s2o", "S2_COMPILER_IMAGE");
-            let expand = s.library_procedure(&["s2", "compiler"], "expand");
-            let codegen = s.library_procedure(&["s2", "compiler"], "codegen");
-            s.scheme = Some((expand, codegen));
-            // Every compile through the compiler in Scheme (plan/08, C6):
-            // eval and %load-library, which load, imports and library
-            // files go through, and dis, become its own.
-            for (name, export) in [("eval", "eval-form"), ("%load-library", "load-library"), ("dis", "dis-form")] {
-                let f = s.library_procedure(&["s2", "compiler"], export);
-                let name = s.heap.intern(name).as_ref().unwrap();
-                let Some(globals::TopBinding::Variable(cell)) = env_of(system).borrow().lookup(name) else { unreachable!() };
-                globals::cell_value(cell).set(f);
-            }
+        s.load_image(COMPILER_IMAGE, "S3_COMPILER_IMAGE");
+        let expand = s.library_procedure(&["s3", "compiler"], "expand");
+        let codegen = s.library_procedure(&["s3", "compiler"], "codegen");
+        s.scheme = Some((expand, codegen));
+        // Every compile through the compiler in Scheme (plan/08, C6):
+        // eval and %load-library, which load, imports and library files go
+        // through, and dis, become its own.
+        for (name, export) in [("eval", "eval-form"), ("%load-library", "load-library"), ("dis", "dis-form")] {
+            let f = s.library_procedure(&["s3", "compiler"], export);
+            let name = s.heap.intern(name).as_ref().unwrap();
+            let Some(globals::TopBinding::Variable(cell)) = env_of(system).borrow().lookup(name) else { unreachable!() };
+            globals::cell_value(cell).set(f);
         }
         // The interaction environment: every system binding, imported
         // (globals.rs).
@@ -131,42 +134,16 @@ impl Session {
         s
     }
 
-    /// Load Scheme source built into s2 (`scheme/core.scm`, the compiler)
-    /// into the system environment, from its compiled image: the file the
-    /// environment variable `variable` names, if it is set; otherwise the
-    /// one cached next to the executable as `image_name`, if that is fresh.
-    /// If not, compile and run the source form by form, and write the image
-    /// for next time (plan/04 P11). Without the Rust compiler nothing can
-    /// compile it here, so the cached image is used however old it is.
-    fn load_image(&mut self, source: &str, image_name: &str, variable: &str) {
-        let named = std::env::var_os(variable).map(std::path::PathBuf::from);
-        let image = std::env::current_exe().map(|exe| exe.with_file_name(image_name)).ok();
-        let result = match (named, image) {
-            (Some(path), _) => self.run_image_file(&path),
-            #[cfg(not(feature = "rust-compiler"))]
-            (None, Some(path)) => {
-                let _ = source;
-                self.run_image_file(&path).map_err(|e| {
-                    format!("{}: s2 was built without the Rust compiler, so it needs an image made by one with it (--core-image, --compiler-image)", e)
-                })
-            }
-            #[cfg(feature = "rust-compiler")]
-            (None, image) => {
-                let system = self.heap.system.unwrap();
-                match image.as_deref().and_then(|p| fasl::read_cached(&mut self.heap, system, p)) {
-                    Some(fasl::Loaded::Code(templates)) => self.run_templates(&templates),
-                    _ => self.build_image(source).map(|bytes| {
-                        if let Some(image) = image {
-                            fasl::write_cache(&image, &bytes);
-                        }
-                    }),
-                }
-            }
-            #[cfg(not(feature = "rust-compiler"))]
-            (None, None) => Err("can't find the executable's directory".into()),
+    /// Load an image built into s3 (`scheme/core.scm`, the compiler) into
+    /// the system environment: the file the environment variable
+    /// `variable` names, if it is set, otherwise `image`.
+    fn load_image(&mut self, image: &[u8], variable: &str) {
+        let result = match std::env::var_os(variable) {
+            Some(path) => self.run_image_file(Path::new(&path)),
+            None => self.run_image(image),
         };
         if let Err(e) = result {
-            panic!("{}: {}", image_name, e);
+            panic!("{}: {}", variable, e);
         }
     }
 
@@ -177,7 +154,7 @@ impl Session {
     }
 
     /// Compile and run `source` form by form in the system environment,
-    /// which must be `self.env`, with the compiler selected; its image.
+    /// which must be `self.env`; its image.
     fn build_image(&mut self, source: &str) -> Result<Vec<u8>, String> {
         let system = self.heap.system.unwrap();
         env_of(system).borrow_mut().touched = Some(Vec::new());
@@ -201,7 +178,7 @@ impl Session {
         bytes
     }
 
-    /// `scheme/core.scm`'s image, compiled by the compiler selected. The
+    /// `scheme/core.scm`'s image, compiled by the compiler in Scheme. The
     /// system environment already has core's bindings, so it is compiled
     /// for a new one, made as `new` makes the system environment, standing
     /// in as the system environment while it compiles. The compiler's own
@@ -239,7 +216,7 @@ impl Session {
         bytes
     }
 
-    /// `(s2 compiler)`'s image, compiled by the compiler selected: for
+    /// `(s3 compiler)`'s image, compiled by itself: for
     /// self-compilation (plan/08, P13.5).
     fn compiler_image(&mut self) -> Result<Vec<u8>, String> {
         let saved = std::mem::replace(&mut self.env, self.heap.system.unwrap());
@@ -290,13 +267,9 @@ impl Session {
     }
 
     /// Compile one top-level form, printing its AST and code for
-    /// `--expand` and `--dis`: with the compiler in Scheme if `S2_COMPILER`
-    /// chose it, else in Rust.
+    /// `--expand` and `--dis`.
     fn compile(&mut self, datum: Value) -> Result<GcRef, String> {
         let Some((expand, codegen)) = self.scheme else {
-            #[cfg(feature = "rust-compiler")]
-            return self.expand(datum).and_then(|ast| self.generate(&ast));
-            #[cfg(not(feature = "rust-compiler"))]
             return Err("the compiler isn't loaded".into());
         };
         let env = Value::obj(self.env);
@@ -312,48 +285,13 @@ impl Session {
             Ok(t) if matches!(t.as_obj().map(|o| &o.kind), Some(heap::Obj::Template(_))) => t.as_ref().unwrap(),
             Ok(t) => return Err(format!("the compiler in Scheme returned {}", printer::print_value(t))),
             Err(e) => {
-                // A compile error is reported as the Rust compiler's is,
-                // without the compiler's own procedures as a backtrace.
+                // A compile error is reported without the compiler's own
+                // procedures as a backtrace.
                 self.vm.backtrace.clear();
                 libraries::Libraries::abandon_compiles(&mut self.heap);
                 return Err(e);
             }
         };
-        if self.dis {
-            io::write_stdout(&self.heap, &compile::disasm::disassemble(template));
-        }
-        Ok(template)
-    }
-
-    /// Expand one top-level form. If it imports a library whose file
-    /// hasn't been loaded, load the file and try again.
-    #[cfg(feature = "rust-compiler")]
-    fn expand(&mut self, datum: Value) -> Result<compile::ast::Expr, String> {
-        loop {
-            match compile::expand::expand(&mut self.heap, self.env, datum) {
-                Ok(ast) => return Ok(ast),
-                Err(e) => match self.heap.libraries.pending_load.take() {
-                    Some(path) => {
-                        // The form waits through the load's collections.
-                        self.heap.pinned.push(datum);
-                        let loaded = self.load_library(&path);
-                        self.heap.pinned.pop();
-                        loaded?;
-                    }
-                    None => return Err(e),
-                },
-            }
-        }
-    }
-
-    /// Generate a form's code in Rust, printing its AST and code for
-    /// `--expand` and `--dis`.
-    #[cfg(feature = "rust-compiler")]
-    fn generate(&mut self, ast: &compile::ast::Expr) -> Result<GcRef, String> {
-        if self.expand {
-            io::write_stdout(&self.heap, &format!("{}\n", compile::ast::show(ast)));
-        }
-        let template = compile::generate(&mut self.heap, ast);
         if self.dis {
             io::write_stdout(&self.heap, &compile::disasm::disassemble(template));
         }
@@ -366,7 +304,7 @@ impl Session {
         let name = self.heap.string(&path.to_string_lossy());
         let form = self.heap.list(vec![f, name]);
         let saved = std::mem::replace(&mut self.env, self.heap.interaction.unwrap());
-        // Not printed by --expand and --dis: the form is s2's, not the
+        // Not printed by --expand and --dis: the form is s3's, not the
         // program's (and the compiler in Scheme loads libraries without it).
         let flags = (std::mem::take(&mut self.expand), std::mem::take(&mut self.dis));
         let result = self.eval(form);
@@ -382,7 +320,7 @@ impl Session {
         let mut ok = true;
         loop {
             if prompt {
-                io::write_stdout(&self.heap, "s2> ");
+                io::write_stdout(&self.heap, "s3> ");
                 std::io::stdout().flush().ok();
             }
             let result = match parse(&mut self.heap, port) {
@@ -431,7 +369,7 @@ impl Session {
     fn run_program(&mut self, args: &[String]) -> ! {
         builtins::set_command_line(args.to_vec());
         let bytes = std::fs::read(&args[0]).unwrap_or_else(|e| {
-            eprintln!("s2: {}: {}", args[0], e);
+            eprintln!("s3: {}: {}", args[0], e);
             std::process::exit(EXIT_ERROR);
         });
         if fasl::is_fasl(&bytes) {
@@ -533,11 +471,11 @@ fn program_text(bytes: Vec<u8>) -> String {
 const EXIT_ERROR: i32 = 70;
 
 fn usage() -> ! {
-    eprintln!("usage: s2 [--expand] [--dis] [-e TEXT | -f FILE | PROGRAM [ARG ...] | --compile FILE [-o OUT]]");
+    eprintln!("usage: s3 [--expand] [--dis] [-e TEXT | -f FILE | PROGRAM [ARG ...] | --compile FILE [-o OUT]]");
     std::process::exit(2);
 }
 
-/// `s2 --compile`: report an error, or write the compiled file.
+/// `s3 --compile`: report an error, or write the compiled file.
 fn compile_to(session: &mut Session, file: &str, out: &Path) -> bool {
     match session.compile_file(file).and_then(|bytes| std::fs::write(out, bytes).map_err(|e| format!("{}: {}", out.display(), e))) {
         Ok(()) => true,
@@ -548,11 +486,10 @@ fn compile_to(session: &mut Session, file: &str, out: &Path) -> bool {
     }
 }
 
-/// The stack size of the thread s2 runs on. The expander, analysis and
-/// code generation recurse over the code, and deeply nested code (a long
-/// `or`, a `cond` with many clauses, which macros turn into nesting) needs
-/// a deep stack: in a debug build, over 10KB per level. This is address
-/// space, used only as deep as the code goes.
+/// The stack size of the thread s3 runs on. The reader, the printer,
+/// `equal?` and the compiled-file writer recurse over data, and deeply
+/// nested data (a list nested 100,000 deep) needs a deep stack. This is
+/// address space, used only as deep as the data goes.
 const STACK_SIZE: usize = 1 << 30;
 
 fn main() {
@@ -584,11 +521,11 @@ fn run_main() {
         [flag, file] if flag == "-f" => match std::fs::read_to_string(file) {
             Ok(text) => session.eval_port(&mut io::new_string_port_input(&text), false, false),
             Err(e) => {
-                eprintln!("s2: {}: {}", file, e);
+                eprintln!("s3: {}: {}", file, e);
                 false
             }
         },
-        [flag, file] if flag == "--compile" => compile_to(&mut session, file, &Path::new(file).with_extension("s2o")),
+        [flag, file] if flag == "--compile" => compile_to(&mut session, file, &Path::new(file).with_extension("s3o")),
         [flag, file, o, out] if flag == "--compile" && o == "-o" => compile_to(&mut session, file, Path::new(out)),
         [flag, out] if flag == "--core-image" || flag == "--compiler-image" => {
             let image = if flag == "--core-image" { session.core_image() } else { session.compiler_image() };
@@ -984,10 +921,10 @@ mod tests {
               &["error: import: only allowed at top level", "yes"]);
     }
 
-    /// Compile `program` ahead, as `s2 --compile` does, load the compiled
+    /// Compile `program` ahead, as `s3 --compile` does, load the compiled
     /// file into a new session and run it, then evaluate `checks` there.
     fn run_compiled(program: &str, checks: &str) -> Result<Vec<String>, String> {
-        let path = std::env::temp_dir().join(format!("s2-fasl-test-{}-{}.scm", std::process::id(), program.len()));
+        let path = std::env::temp_dir().join(format!("s3-fasl-test-{}-{}.scm", std::process::id(), program.len()));
         std::fs::write(&path, program).unwrap();
         let bytes = Session::new().compile_file(path.to_str().unwrap());
         std::fs::remove_file(&path).ok();
@@ -1028,7 +965,7 @@ mod tests {
 
     #[test]
     fn damaged_compiled_files() {
-        let path = std::env::temp_dir().join(format!("s2-fasl-damaged-{}.scm", std::process::id()));
+        let path = std::env::temp_dir().join(format!("s3-fasl-damaged-{}.scm", std::process::id()));
         std::fs::write(&path, r#"(define (f x) (list x 'a "b" 1.5)) (f 1)"#).unwrap();
         let bytes = Session::new().compile_file(path.to_str().unwrap()).unwrap();
         std::fs::remove_file(&path).ok();
@@ -1039,14 +976,14 @@ mod tests {
         }
         let mut other = bytes.clone();
         other[8] = 99;
-        assert_eq!(fasl::read(&mut s.heap, s.env, &other).unwrap_err(), "compiled file is version 99, and this s2 reads version 2: compile it again");
+        assert_eq!(fasl::read(&mut s.heap, s.env, &other).unwrap_err(), "compiled file is version 99, and this s3 reads version 2: compile it again");
     }
 
     #[test]
     fn deep_expansions() {
         // A 1,000-argument or nests 1,000 macro uses, and as many lets: on
         // a default 2MB thread stack, a debug build overflowed at about 150.
-        // Unstressed, even under S2_GC_STRESS: with the Scheme front end,
+        // Unstressed, even under S3_GC_STRESS: with the Scheme front end,
         // collecting at every safepoint over these expansions takes hours.
         let unstressed = || {
             let mut s = Session::new();
@@ -1069,23 +1006,6 @@ mod tests {
               &["error: not a syntax-rules transformer: 5", "error: syntax-rules: only allowed as a macro's transformer: (syntax-rules ())",
                 "error: if: syntax used as a variable", "error: set!: can't assign to syntax: if"]);
         check("(let () (define-syntax m (syntax-rules () ((_) 1))) (define m 2) m)", &["error: define: duplicate definition: m"]);
-    }
-
-    /// `--expand` output: the core AST, with renamed variables numbered.
-    #[test]
-    #[cfg(feature = "rust-compiler")]
-    fn expand_shows_the_core_ast() {
-        let mut s = Session::new();
-        let mut show = |src: &str| {
-            let datum = parse(&mut s.heap, &mut io::new_string_port_input(src)).unwrap();
-            compile::ast::show(&compile::expand::expand(&mut s.heap, s.env, datum).unwrap())
-        };
-        assert_eq!(show("(define (f x) (or x 'none))"),
-                   "(define f (named-lambda (f x.1) (let ((x.2 x.1)) (if x.2 x.2 'none))))");
-        assert_eq!(show("(let loop ((i 0)) (when (< i 3) (loop (+ i 1))))"),
-                   "((letrec* ((loop.1 (named-lambda (loop i.2) (if (< i.2 3) (loop.1 (+ i.2 1)) #<unspecified>)))) loop.1) 0)");
-        assert_eq!(show("`(a ,b)"), "(cons 'a (cons b '()))");
-        assert_eq!(show("(lambda args (set! args 1) args)"), "(lambda args.1 (begin (set! args.1 1) args.1))");
     }
 
     #[test]

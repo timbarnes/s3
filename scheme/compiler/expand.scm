@@ -1,7 +1,7 @@
-;;; The expander: datum to core AST, with hygienic macros, as
-;;; src/compile/expand.rs does it. Its output must be the Rust expander's
-;;; exactly, down to the variable numbers (plan/08, C7), so the order in
-;;; which it expands and numbers things follows the Rust code's.
+;;; The expander: datum to core AST, with hygienic macros. It was written
+;;; to match s2's Rust expander exactly, down to the variable numbers
+;;; (plan/08, C7; tag s2-final), so the order in which it expands and
+;;; numbers things follows that code's.
 ;;;
 ;;; The syntactic environment says what each identifier means. Local scopes
 ;;; are frames, innermost first; below them is a top-level environment (a

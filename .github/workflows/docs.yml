@@ -1,6 +1,6 @@
 # Build the user docs (docs/, with MkDocs) and the internal docs (cargo doc)
 # and publish them on GitHub Pages on every push to main: the user docs at
-# https://timbarnes.github.io/s2/ and the internal docs under api/.
+# https://timbarnes.github.io/s3/ and the internal docs under api/.
 # .cargo/config.toml turns on --document-private-items.
 name: Docs
 
@@ -40,7 +40,7 @@ jobs:
           # rustdoc's lock file isn't readable by the artifact upload.
           rm -f target/doc/.lock
           cp -r target/doc site/api
-          echo '<meta http-equiv="refresh" content="0; url=s2/index.html">' > site/api/index.html
+          echo '<meta http-equiv="refresh" content="0; url=s3/index.html">' > site/api/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

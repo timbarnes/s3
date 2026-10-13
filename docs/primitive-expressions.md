@@ -12,13 +12,13 @@ An identifier evaluates to the value of the variable it names. Referring to a va
 
 Returns `datum` without evaluating it. `'(1 2 3)` is a list, `'a` is a symbol. Numbers, strings, characters, booleans, vectors and bytevectors evaluate to themselves, so they don't need quoting.
 
-Quoted data are constants: s2 doesn't stop you modifying one with `set-car!` or `string-set!`, but R7RS makes that an error, and portable code should copy first (`list-copy`, `string-copy`).
+Quoted data are constants: s3 doesn't stop you modifying one with `set-car!` or `string-set!`, but R7RS makes that an error, and portable code should copy first (`list-copy`, `string-copy`).
 
 ## Procedure calls
 
 `(operator operand ...)`
 
-Evaluates the operator and the operands, then calls the operator's value with the operands' values. s2 evaluates them left to right, operator first; R7RS leaves the order unspecified, so portable code shouldn't depend on it. Calling something that isn't a procedure raises an error (`not a procedure: 5`), as does passing the wrong number of arguments.
+Evaluates the operator and the operands, then calls the operator's value with the operands' values. s3 evaluates them left to right, operator first; R7RS leaves the order unspecified, so portable code shouldn't depend on it. Calling something that isn't a procedure raises an error (`not a procedure: 5`), as does passing the wrong number of arguments.
 
 ## `lambda`
 
@@ -38,7 +38,7 @@ For procedures with optional arguments or several argument counts, see [`case-la
 
 `(if test consequent [alternate])`
 
-Evaluates `test`. If its value is anything but `#f`, evaluates and returns `consequent`; otherwise `alternate`. Without an alternate, the result when `test` is false is unspecified. In s2 that is a value that prints as `#<unspecified>` (see [Input and Output](./input-and-output.md#how-objects-print)).
+Evaluates `test`. If its value is anything but `#f`, evaluates and returns `consequent`; otherwise `alternate`. Without an alternate, the result when `test` is false is unspecified. In s3 that is a value that prints as `#<unspecified>` (see [Input and Output](./input-and-output.md#how-objects-print)).
 
 ## `set!`
 

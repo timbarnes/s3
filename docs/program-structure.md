@@ -4,7 +4,7 @@ R7RS: [chapter 5, Program structure](https://standards.scheme.org/corrected-r7rs
 
 ## Programs
 
-A program is a file of definitions and expressions, evaluated in order. R7RS requires a program to start with an `import` declaration naming the libraries it uses; in s2 that is optional. Programs run in the [interaction environment](./environments.md#the-system-and-interaction-environments), which already contains every standard binding, so
+A program is a file of definitions and expressions, evaluated in order. R7RS requires a program to start with an `import` declaration naming the libraries it uses; in s3 that is optional. Programs run in the [interaction environment](./environments.md#the-system-and-interaction-environments), which already contains every standard binding, so
 
 ```scheme
 (import (scheme base) (scheme write))
@@ -14,7 +14,7 @@ A program is a file of definitions and expressions, evaluated in order. R7RS req
 
 and the same file without its first line both work. `import` is still useful for loading your own libraries, or to rename (see [Libraries](./libraries.md#import)).
 
-Run a program with `s2 program.scm [arg ...]`. It exits when the last form has been evaluated, or when it calls `exit`. See [System Interface](./system-interface.md#running-s2).
+Run a program with `s3 program.scm [arg ...]`. It exits when the last form has been evaluated, or when it calls `exit`. See [System Interface](./system-interface.md#running-s3).
 
 Each top-level form is expanded and compiled as a whole, then run, before the next form is read. So a macro defined by one form can be used by the next, and a definition is visible to every later form.
 
@@ -42,7 +42,7 @@ Definitions at the start of a body (of a `lambda`, `define`, `let` and the other
 (f)                        ; => 10
 ```
 
-R7RS requires all of a body's definitions to come before its expressions, and so does s2: a definition after an expression is an error.
+R7RS requires all of a body's definitions to come before its expressions, and so does s3: a definition after an expression is an error.
 
 ### Multiple-value definitions
 
@@ -56,18 +56,18 @@ R7RS requires all of a body's definitions to come before its expressions, and so
 
 R7RS: [section 5.7](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-7.html#TAG:__tex2page_sec_5.7).
 
-Run `s2` with no program to start the REPL. It reads a form, evaluates it in the interaction environment, and writes each of its values on a line of its own. An unspecified value, or no values, prints nothing:
+Run `s3` with no program to start the REPL. It reads a form, evaluates it in the interaction environment, and writes each of its values on a line of its own. An unspecified value, or no values, prints nothing:
 
 ```scheme
-s2> (values 1 2)
+s3> (values 1 2)
 1
 2
-s2> (car 1)
+s3> (car 1)
 error: car: expected a pair, got 1
 ```
 
-The `s2> ` prompt appears only when standard input is a terminal, so `s2 < file.scm` prints just the results.
+The `s3> ` prompt appears only when standard input is a terminal, so `s3 < file.scm` prints just the results.
 
 An error that nothing handles is reported, and the REPL reads the next form. At the REPL, a definition replaces any earlier binding of the same name, including an imported one, so you can redefine things as you work. `(exit)` or end of input (Ctrl-D) leaves the REPL.
 
-The REPL has no line editing or history of its own; running it under a wrapper such as `rlwrap s2` adds them. `(load "file.scm")` loads a file into it. See [s2 Extensions](./extensions.md) for the few tools that help at the REPL.
+The REPL has no line editing or history of its own; running it under a wrapper such as `rlwrap s3` adds them. `(load "file.scm")` loads a file into it. See [s3 Extensions](./extensions.md) for the few tools that help at the REPL.

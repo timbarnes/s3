@@ -18,7 +18,7 @@
 //!   object is reachable from the roots at every safepoint.
 //!
 //! Two debugging modes, read from the environment by `Heap::new`:
-//! `S2_GC_STRESS` collects at every safepoint, and `S2_GC_POISON` turns
+//! `S3_GC_STRESS` collects at every safepoint, and `S3_GC_POISON` turns
 //! freed objects into the symbol `<<FREED>>` (and leaks them) instead of
 //! freeing them, so a premature free shows up in output.
 
@@ -185,8 +185,8 @@ impl Heap {
             live_after_gc: 0,
             epoch: 0,
             worklist: Vec::new(),
-            stress: std::env::var_os("S2_GC_STRESS").is_some(),
-            poison: std::env::var_os("S2_GC_POISON").is_some(),
+            stress: std::env::var_os("S3_GC_STRESS").is_some(),
+            poison: std::env::var_os("S3_GC_POISON").is_some(),
             collections: 0,
             marked: 0,
             system: None,
@@ -555,7 +555,7 @@ impl Drop for Heap {
         for r in self.objects.drain(..) {
             // Safety: every GcRef in `objects` came from Box::leak in alloc,
             // and each is freed once (sweep removes what it frees). Values
-            // outliving the heap dangle, which s2's single long-lived heap
+            // outliving the heap dangle, which s3's single long-lived heap
             // never does.
             drop(unsafe { Box::from_raw(r.0.as_ptr()) });
         }

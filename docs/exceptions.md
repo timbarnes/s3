@@ -69,7 +69,7 @@ An error object prints as `#<error "message" irritant ...>`.
 
 ## Uncaught exceptions
 
-When nothing handles an exception, s2 runs the `after` thunks of any `dynamic-wind` extents that were active, innermost first, and prints it on standard error as `error: message irritant ...` (or `error: uncaught exception: obj` for a raised object that isn't an error object), followed by a backtrace: the names of the procedures that were waiting for a value, innermost first, up to ten.
+When nothing handles an exception, s3 runs the `after` thunks of any `dynamic-wind` extents that were active, innermost first, and prints it on standard error as `error: message irritant ...` (or `error: uncaught exception: obj` for a raised object that isn't an error object), followed by a backtrace: the names of the procedures that were waiting for a value, innermost first, up to ten.
 
 ```
 error: unbound variable: h

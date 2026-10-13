@@ -8,7 +8,7 @@ Scheme has three ways to ask whether two objects are the same, from the strictes
 
 `(eq? obj1 obj2)`
 
-`#t` if `obj1` and `obj2` are the same object. Symbols with the same name, the empty list, booleans and characters are always `eq?`. In s2, small exact integers (fixnums) and flonums that are `eqv?` are also `eq?`, but bignums and ratios are not: `(eq? (expt 10 20) (expt 10 20))` is `#f`. R7RS doesn't promise either, so use `eqv?` for numbers and characters.
+`#t` if `obj1` and `obj2` are the same object. Symbols with the same name, the empty list, booleans and characters are always `eq?`. In s3, small exact integers (fixnums) and flonums that are `eqv?` are also `eq?`, but bignums and ratios are not: `(eq? (expt 10 20) (expt 10 20))` is `#f`. R7RS doesn't promise either, so use `eqv?` for numbers and characters.
 
 ## `eqv?`
 

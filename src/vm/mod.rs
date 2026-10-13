@@ -5,6 +5,7 @@ pub mod op;
 pub mod stack;
 #[cfg(feature = "stats")]
 pub mod stats;
+pub mod verify;
 
 pub use machine::{Frame, Vm};
 pub use op::{Op, Template};

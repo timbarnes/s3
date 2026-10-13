@@ -55,7 +55,7 @@ use crate::value::Value;
 use crate::vm::op::Test;
 use crate::vm::{Op, Template};
 
-const MAGIC: &[u8; 8] = b"s2fasl\r\n";
+const MAGIC: &[u8; 8] = b"s3fasl\r\n";
 
 /// Bump when the encoding, or the meaning of an instruction, changes:
 /// files written by another version are refused.
@@ -632,7 +632,7 @@ impl Reader<'_> {
         self.at = MAGIC.len();
         let version = u32::from_le_bytes(self.bytes(4)?.try_into().unwrap());
         if version != VERSION {
-            return Err(format!("compiled file is version {}, and this s2 reads version {}: compile it again", version, VERSION));
+            return Err(format!("compiled file is version {}, and this s3 reads version {}: compile it again", version, VERSION));
         }
         let n = self.small()?;
         (0..n).map(|_| Ok((PathBuf::from(self.str()?), self.uint()?, self.small()?))).collect()
@@ -702,8 +702,8 @@ impl Reader<'_> {
 
 /// Whether the compiled file `bytes`, written at `written`, is newer than
 /// everything it was compiled from: each source still has the
-/// modification time it had, and the running s2 was built before the file
-/// was written (so a rebuilt s2, which may compile differently, compiles
+/// modification time it had, and the running s3 was built before the file
+/// was written (so a rebuilt s3, which may compile differently, compiles
 /// again).
 fn fresh(bytes: &[u8], written: SystemTime) -> bool {
     let Ok(sources) = (Reader { bytes, at: 0 }).header() else { return false };
@@ -727,7 +727,7 @@ pub fn read_cached(heap: &mut Heap, target: GcRef, path: &Path) -> Option<Loaded
 }
 
 /// Write a cache file, best effort: whole, then renamed into place, so
-/// another s2 never reads half of one.
+/// another s3 never reads half of one.
 pub fn write_cache(path: &Path, bytes: &[u8]) {
     let temp = path.with_extension(format!("tmp{}", std::process::id()));
     if std::fs::write(&temp, bytes).and_then(|()| std::fs::rename(&temp, path)).is_err() {
@@ -858,7 +858,9 @@ fn read_unit(heap: &mut Heap, target: GcRef, bytes: &[u8]) -> Result<Loaded, Str
                     (0..n).map(|_| r.str()).collect()
                 };
                 let (local_names, free_names) = (names()?, names()?);
-                Value::obj(heap.template(Template { name, required, rest, nfree, code, consts, local_names, free_names }))
+                let t = Template { name, required, rest, nfree, code, consts, local_names, free_names };
+                crate::vm::verify::verify(&t).map_err(|e| format!("compiled file: {}", e))?;
+                Value::obj(heap.template(t))
             }
             _ => return Err(TRUNCATED.into()),
         };

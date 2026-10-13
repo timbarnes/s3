@@ -6,7 +6,7 @@ An environment is a set of top-level bindings that an expression can be evaluate
 
 ## The system and interaction environments
 
-s2's built-in procedures and special forms, and everything `scheme/core.scm` defines, live in the *system environment*. Programs, the REPL and loaded files run in the *interaction environment*, which imports every system binding. An imported name shares the system's variable, so:
+s3's built-in procedures and special forms, and everything `scheme/core.scm` defines, live in the *system environment*. Programs, the REPL and loaded files run in the *interaction environment*, which imports every system binding. An imported name shares the system's variable, so:
 
 * `(define car ...)` at the REPL makes a new `car` for the interaction environment only. Procedures defined in `core.scm`, and code compiled before the `define`, keep using the system's `car`.
 * `(set! car ...)` is an error: an imported variable can only be assigned by its owner. Names the program defines itself can be `set!` as usual.
@@ -30,7 +30,7 @@ These are R5RS procedures that R7RS keeps in `(scheme r5rs)` for older code. `(s
 
 `(interaction-environment)`
 
-Returns the environment the REPL and loaded files run in: everything the system environment holds, imported, and the program's own top-level definitions. Environments print as `#<environment>`, and `environment?` (an s2 extension) tests for them.
+Returns the environment the REPL and loaded files run in: everything the system environment holds, imported, and the program's own top-level definitions. Environments print as `#<environment>`, and `environment?` (an s3 extension) tests for them.
 
 ## `eval`
 

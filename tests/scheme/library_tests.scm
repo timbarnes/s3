@@ -1,12 +1,12 @@
 ;; library_tests.scm: environments, eval and libraries. Ported from s1's
 ;; scheme/library_tests.scm (see its design/libraries-design.md), with these
 ;; changes:
-;; - errors s2 finds while compiling a top-level form (set! of an import,
+;; - errors s3 finds while compiling a top-level form (set! of an import,
 ;;   import or define-library in a body, a misplaced cond-expand else)
 ;;   can't be caught by a guard in that same form, so those tests compile
 ;;   the form with eval, where the error is raised;
 ;; - s1's extensions (one-argument eval, type-of, empty?, top) are left
-;;   out or replaced, and (s1) is (s2);
+;;   out or replaced, and (s1) is (s3);
 ;; - temporary files go in target/.
 
 (display "          === Testing environments and eval ===")
@@ -42,7 +42,7 @@
     "a continuation called from inside eval")
 
 ;; load with an environment runs the file before returning
-(define library-test-file "target/s2-library-test.tmp")
+(define library-test-file "target/s3-library-test.tmp")
 (call-with-output-file library-test-file
   (lambda (p) (write '(define loaded-value (* 6 7)) p) (write '(define loaded-twice (* 2 loaded-value)) p)))
 (test-equal '(42 84)
@@ -63,8 +63,8 @@
     "an environment holds only what its libraries export")
 (test-equal 'unbound
     (guard (e (#t 'unbound)) (eval '(%frame-depth) (environment '(scheme base))))
-    "s2's extensions aren't in (scheme base)")
-(test-equal #t (procedure? (eval 'dis (environment '(s2)))) "(s2) exports s2's extensions")
+    "s3's extensions aren't in (scheme base)")
+(test-equal #t (procedure? (eval 'dis (environment '(s3)))) "(s3) exports s3's extensions")
 (test-equal "define: this environment is immutable"
     (guard (e (#t (error-object-message e))) (eval '(define x 1) (environment '(scheme base))))
     "an environment from environment is immutable")
@@ -77,18 +77,18 @@
     (guard (e (#t (error-object-message e))) (environment '(no such library)))
     "an unknown library")
 (test-equal '(case-lambda) (library-exports '(scheme case-lambda)) "library-exports")
-(test-equal '(#t #t) (list (and (member '(scheme base) (library-names)) #t) (and (member '(s2) (library-names)) #t))
+(test-equal '(#t #t) (list (and (member '(scheme base) (library-names)) #t) (and (member '(s3) (library-names)) #t))
     "library-names")
-;; (s2) exports s2's own names, not the hidden definitions macros make
+;; (s3) exports s3's own names, not the hidden definitions macros make
 ;; (define-record-type's field index is defined under an alias of `index`).
 (test-equal '(define-library dis environment? library-exports library-names port?)
-    (let loop ((names (library-exports '(s2))) (acc '()))
+    (let loop ((names (library-exports '(s3))) (acc '()))
       (cond ((null? names) (reverse acc))
             ((char=? (string-ref (symbol->string (car names)) 0) #\%) (loop (cdr names) acc))
             (else (loop (cdr names) (cons (car names) acc)))))
-    "(s2) exports")
+    "(s3) exports")
 
-;; What R7RS assigns the standard libraries that s2 doesn't define: only
+;; What R7RS assigns the standard libraries that s3 doesn't define: only
 ;; the complex-number procedures, which aren't planned.
 (test-equal '(((scheme complex) ("angle" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part"))
               ((scheme r5rs) ("angle" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part")))
@@ -96,7 +96,7 @@
       (cond ((null? names) (reverse acc))
             ((null? (%library-unimplemented (car names))) (loop (cdr names) acc))
             (else (loop (cdr names) (cons (list (car names) (%library-unimplemented (car names))) acc)))))
-    "standard names s2 doesn't define yet")
+    "standard names s3 doesn't define yet")
 
 (display "          === Testing the interaction environment's imports ===")
 (newline)
@@ -244,9 +244,9 @@
     "define-library isn't allowed in a body")
 
 ;; include, include-ci and include-library-declarations
-(define include-test-file "target/s2-include-test.tmp")
-(define include-ci-file "target/s2-include-ci.tmp")
-(define include-decl-file "target/s2-include-decl.tmp")
+(define include-test-file "target/s3-include-test.tmp")
+(define include-ci-file "target/s3-include-ci.tmp")
+(define include-decl-file "target/s3-include-decl.tmp")
 (call-with-output-file include-test-file
   (lambda (p) (write '(define (included-double x) (* 2 x)) p)))
 (call-with-output-file include-ci-file
@@ -254,17 +254,17 @@
 (call-with-output-file include-decl-file
   (lambda (p) (write '(export included-double) p) (write '(import (scheme base)) p)))
 (define-library (test included)
-  (include-library-declarations "target/s2-include-decl.tmp")
-  (include "target/s2-include-test.tmp"))
+  (include-library-declarations "target/s3-include-decl.tmp")
+  (include "target/s3-include-test.tmp"))
 (import (test included))
 (test-equal 8 (included-double 4) "include and include-library-declarations in a library")
 (define-library (test included-ci)
   (export included-upper)
   (import (scheme base))
-  (include-ci "target/s2-include-ci.tmp"))
+  (include-ci "target/s3-include-ci.tmp"))
 (import (test included-ci))
 (test-equal 'up included-upper "include-ci folds case")
-(test-equal 10 (let () (include "target/s2-include-test.tmp") (included-double 5)) "include in a body")
+(test-equal 10 (let () (include "target/s3-include-test.tmp") (included-double 5)) "include in a body")
 (delete-file include-test-file)
 (delete-file include-ci-file)
 (delete-file include-decl-file)
@@ -301,19 +301,19 @@
 (display "          === Testing cond-expand and features ===")
 (newline)
 
-(test-equal '(#t #t #t #t) (map (lambda (f) (and (memq f (features)) #t)) '(r7rs ratios s2 full-unicode)) "features")
+(test-equal '(#t #t #t #t) (map (lambda (f) (and (memq f (features)) #t)) '(r7rs ratios s3 full-unicode)) "features")
 (test-equal #f (and (memq 'exact-complex (features)) #t) "no complex numbers")
 (test-equal 'yes (cond-expand (r7rs 'yes) (else 'no)) "a feature")
 (test-equal 'else (cond-expand (no-such-feature 'yes) (else 'else)) "else")
 (test-equal 'and-or-not
-    (cond-expand ((and s2 (or no-such-feature r7rs) (not no-such-feature)) 'and-or-not) (else 'no))
+    (cond-expand ((and s3 (or no-such-feature r7rs) (not no-such-feature)) 'and-or-not) (else 'no))
     "and, or and not")
 (test-equal '(registered on-disk absent)
     (list (cond-expand ((library (scheme base)) 'registered) (else 'no))
           (cond-expand ((library (tests libs never-imported)) 'on-disk) (else 'no))
           (cond-expand ((library (no such library)) 'present) (else 'absent)))
     "library requirements")
-(cond-expand (s2 (define defined-by-cond-expand 'top)) (else))
+(cond-expand (s3 (define defined-by-cond-expand 'top)) (else))
 (test-equal 'top defined-by-cond-expand "cond-expand at top level can define")
 (test-equal #t (eq? (if #f #f) (cond-expand (no-such-feature 1))) "no clause holds")
 (test-equal "cond-expand: else must be the last clause"
@@ -324,9 +324,9 @@
   (export which)
   (cond-expand
     ((library (scheme base)) (import (scheme base)))
-    (else (import (s2))))
+    (else (import (s3))))
   (cond-expand
     (no-such-feature (begin (define which 'wrong)))
-    (s2 (begin (define which 'right)))))
+    (s3 (begin (define which 'right)))))
 (import (test expanded))
 (test-equal 'right which "cond-expand declarations in define-library")

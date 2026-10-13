@@ -1,10 +1,10 @@
 ;; Ported from s1's scheme/syntax_rules_tests.scm, with these changes:
-;; - errors s2 finds when it expands a form (a use no rule matches, a
+;; - errors s3 finds when it expands a form (a use no rule matches, a
 ;;   malformed syntax-rules, syntax-error, auxiliary syntax used as an
 ;;   expression) are tested through eval, since a guard in the same form
 ;;   can't catch them; syntax-error's irritants are written into its message;
 ;; - left out: s1's macro form and (gc), and the test of s1's expansion
-;;   cache (s2 expands when it compiles, P5);
+;;   cache (s3 expands when it compiles, P5);
 ;; - #t-or-ev? is t-or-ev?: an identifier can't start with # (R7RS §7.1.1).
 ;;   With that name the three macros give (#f #t) for (list (ev? 4) (od? 4)),
 ;;   worked by hand; s1's (#t #f) came from how its reader split the

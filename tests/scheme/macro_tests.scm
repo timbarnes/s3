@@ -1,5 +1,5 @@
 ;; Ported from s1's scheme/macro_tests.scm: the one section that doesn't
-;; test s1's procedural macro form (left out of s2 by design). s1's
+;; test s1's procedural macro form (left out of s3 by design). s1's
 ;; hygiene tests are in syntax_rules_tests.scm.
 
 (display "          === Testing Quasiquote at top level ===")

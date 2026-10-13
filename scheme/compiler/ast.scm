@@ -44,14 +44,14 @@
       (append (lambda-params l) (list (lambda-rest l)))
       (lambda-params l)))
 
-;; A value as `write` shows it: what the Rust compiler's print_value gives,
+;; A value as `write` shows it, as the printer's print_value gives it,
 ;; for names and messages.
 (define (show v)
   (let ((port (open-output-string)))
     (write v port)
     (get-output-string port)))
 
-;; An identifier's name as a string, as the Rust compiler prints it.
+;; An identifier's name as a string, as the printer shows it.
 (define (identifier-name id) (show id))
 
 ;;; List helpers that R7RS-small lacks.

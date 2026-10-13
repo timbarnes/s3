@@ -137,22 +137,6 @@ pub enum Test {
 }
 
 impl Test {
-    /// The test an inlined instruction makes, if it is one.
-    #[cfg(feature = "rust-compiler")]
-    pub fn of(op: Op) -> Option<Test> {
-        Some(match op {
-            Op::NullP => Test::NullP,
-            Op::PairP => Test::PairP,
-            Op::EqP => Test::EqP,
-            Op::NumEq => Test::NumEq,
-            Op::Lt => Test::Lt,
-            Op::Gt => Test::Gt,
-            Op::Le => Test::Le,
-            Op::Ge => Test::Ge,
-            _ => return None,
-        })
-    }
-
     pub fn arity(self) -> usize {
         if matches!(self, Test::NullP | Test::PairP) { 1 } else { 2 }
     }

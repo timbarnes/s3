@@ -16,10 +16,8 @@
 //!
 //! **Instructions** are lists, `(name operand ...)`, named as in `INSTRUCTIONS`
 //! below; a `JumpIfNot`'s test is the procedure's name (`null?`, `<`, ...).
-//! `%make-template` builds a `Template` from them, checking every operand it
-//! can: constant indexes, the kind of constant each instruction needs, jump
-//! targets and free-variable indexes. It can't check stack slots, which
-//! depend on the stack depth at each instruction.
+//! `%make-template` builds a `Template` from them, which the verifier
+//! (`vm/verify.rs`) checks first.
 
 use crate::builtins::{Error, Primitive, err, kind, prim};
 use crate::compile::ast::{Expr, Lambda, Var};
@@ -29,87 +27,11 @@ use crate::heap::{GcRef, Heap, Obj, list_to_vec};
 use crate::printer::print_value;
 use crate::value::Value;
 use crate::vm::op::Test;
+use crate::vm::verify::verify;
 use crate::vm::{Op, Template};
 
 // ---------------------------------------------------------------------------
 // The AST
-
-#[cfg(feature = "rust-compiler")]
-fn tagged(heap: &mut Heap, tag: &str, fields: Vec<Value>) -> Value {
-    let mut items = vec![heap.intern(tag)];
-    items.extend(fields);
-    heap.vector(items)
-}
-
-#[cfg(feature = "rust-compiler")]
-fn var_datum(heap: &mut Heap, v: &Var) -> Value {
-    let id = Value::fixnum(v.id as i64).unwrap();
-    tagged(heap, "var", vec![id, v.name])
-}
-
-#[cfg(feature = "rust-compiler")]
-fn bindings_datum(heap: &mut Heap, bindings: &[(Var, Expr)]) -> Value {
-    let pairs = bindings
-        .iter()
-        .map(|(v, init)| {
-            let (v, init) = (var_datum(heap, v), expr_to_datum(heap, init));
-            heap.cons(v, init)
-        })
-        .collect();
-    heap.list(pairs)
-}
-
-#[cfg(feature = "rust-compiler")]
-/// The AST `e` as tagged vectors.
-pub fn expr_to_datum(heap: &mut Heap, e: &Expr) -> Value {
-    let id = |id: u32| Value::fixnum(id as i64).unwrap();
-    match e {
-        Expr::Const(v) => tagged(heap, "const", vec![*v]),
-        Expr::LocalRef(v) => tagged(heap, "local-ref", vec![id(*v)]),
-        Expr::LocalSet(v, x) => {
-            let x = expr_to_datum(heap, x);
-            tagged(heap, "local-set", vec![id(*v), x])
-        }
-        Expr::GlobalRef(c) => tagged(heap, "global-ref", vec![Value::obj(*c)]),
-        Expr::GlobalSet(c, x) | Expr::GlobalDefine(c, x) => {
-            let tag = if matches!(e, Expr::GlobalSet(..)) { "global-set" } else { "global-define" };
-            let x = expr_to_datum(heap, x);
-            tagged(heap, tag, vec![Value::obj(*c), x])
-        }
-        Expr::If(a, b, c) => {
-            let parts = [a, b, c].map(|x| expr_to_datum(heap, x)).to_vec();
-            tagged(heap, "if", parts)
-        }
-        Expr::Seq(xs) => {
-            let items = xs.iter().map(|x| expr_to_datum(heap, x)).collect();
-            let list = heap.list(items);
-            tagged(heap, "seq", vec![list])
-        }
-        Expr::Lambda(l) => {
-            let name = heap.string(&l.name);
-            let params = l.params.iter().map(|p| var_datum(heap, p)).collect();
-            let params = heap.list(params);
-            let rest = match &l.rest {
-                Some(r) => var_datum(heap, r),
-                None => Value::FALSE,
-            };
-            let body = expr_to_datum(heap, &l.body);
-            tagged(heap, "lambda", vec![name, params, rest, body])
-        }
-        Expr::Call(f, args) => {
-            let f = expr_to_datum(heap, f);
-            let args = args.iter().map(|a| expr_to_datum(heap, a)).collect();
-            let args = heap.list(args);
-            tagged(heap, "call", vec![f, args])
-        }
-        Expr::Let(bindings, body) | Expr::Letrec(bindings, body) => {
-            let tag = if matches!(e, Expr::Let(..)) { "let" } else { "letrec" };
-            let bindings = bindings_datum(heap, bindings);
-            let body = expr_to_datum(heap, body);
-            tagged(heap, tag, vec![bindings, body])
-        }
-    }
-}
 
 /// The fields of the node `d`, after its tag, and the tag.
 fn node(d: Value) -> Result<(&'static str, Vec<Value>), String> {
@@ -328,34 +250,9 @@ pub struct TemplateFields {
     pub free_names: Vec<String>,
 }
 
-/// Check `f`'s instructions against its constants and free variables, and
-/// make the template.
+/// Make the template `f` describes, if it passes the verifier.
 pub fn make_template(heap: &mut Heap, f: TemplateFields) -> Result<GcRef, String> {
-    let who = |op: Op, why: &str| format!("%make-template: {:?} in {}: {}", op, f.name, why);
-    for &op in &f.code {
-        let constant = |k: u32| f.consts.get(k as usize).copied().ok_or_else(|| who(op, "no such constant"));
-        let target = |t: u32| if (t as usize) < f.code.len() { Ok(()) } else { Err(who(op, "jump past the end")) };
-        match op {
-            Op::Const(k) => constant(k).map(|_| ())?,
-            Op::GlobalRef(k) | Op::GlobalSet(k) | Op::GlobalDefine(k) => {
-                if !matches!(kind(constant(k)?), Some(Obj::Global { .. })) {
-                    return Err(who(op, "not a global variable's cell"));
-                }
-            }
-            Op::MakeClosure(k) => {
-                if !matches!(kind(constant(k)?), Some(Obj::Template(_))) {
-                    return Err(who(op, "not a template"));
-                }
-            }
-            Op::Jump(t) | Op::JumpIfFalse(t) | Op::JumpIfNot(_, t) | Op::JumpIfNotImm(_, _, t) => target(t)?,
-            Op::FreeRef(i) if i >= f.nfree => return Err(who(op, "no such free variable")),
-            _ => {}
-        }
-    }
-    if f.free_names.len() != f.nfree as usize {
-        return Err(format!("%make-template: {}: {} free variables, but {} names", f.name, f.nfree, f.free_names.len()));
-    }
-    Ok(heap.template(Template {
+    let t = Template {
         name: f.name.into(),
         required: f.required,
         rest: f.rest,
@@ -364,39 +261,9 @@ pub fn make_template(heap: &mut Heap, f: TemplateFields) -> Result<GcRef, String
         consts: f.consts,
         local_names: f.local_names,
         free_names: f.free_names,
-    }))
-}
-
-#[cfg(feature = "rust-compiler")]
-/// A template's fields as data, the arguments `%make-template` takes, with
-/// its inner templates (constants) also taken apart and remade, for the
-/// round trip check.
-pub fn remake(heap: &mut Heap, t: GcRef) -> Result<GcRef, String> {
-    let Obj::Template(t) = &t.get().kind else { unreachable!("not a template") };
-    let mut consts = Vec::with_capacity(t.consts.len());
-    for &c in &t.consts {
-        consts.push(match kind(c) {
-            Some(Obj::Template(_)) => Value::obj(remake(heap, c.as_ref().unwrap())?),
-            _ => c,
-        });
-    }
-    let strings = |heap: &mut Heap, names: &[String]| {
-        let items = names.iter().map(|n| heap.string(n)).collect();
-        heap.vector(items)
     };
-    let code: Vec<Value> = t.code.iter().map(|&op| op_to_datum(heap, op)).collect();
-    let args = [
-        heap.string(&t.name),
-        Value::fixnum(t.required as i64).unwrap(),
-        Value::bool(t.rest),
-        Value::fixnum(t.nfree as i64).unwrap(),
-        heap.vector(code),
-        heap.vector(consts),
-        strings(heap, &t.local_names),
-        strings(heap, &t.free_names),
-    ];
-    let fields = template_fields(&args).map_err(|e| e.message)?;
-    make_template(heap, fields)
+    verify(&t).map_err(|e| format!("%make-template: {}", e))?;
+    Ok(heap.template(t))
 }
 
 fn vector_items(v: Value, what: &str) -> Result<Vec<Value>, Error> {

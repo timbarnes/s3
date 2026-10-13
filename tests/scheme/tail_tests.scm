@@ -1,4 +1,4 @@
-;; Ported from s1's scheme/tail_tests.scm: s1's %kont-depth is s2's
+;; Ported from s1's scheme/tail_tests.scm: s1's %kont-depth is s3's
 ;; %frame-depth, the number of frames waiting for a return.
 
 ;; tail_tests.scm: proper tail calls in every R7RS 3.5 tail context.

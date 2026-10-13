@@ -3,10 +3,10 @@
 ;;; procedures they are given (map, for-each, member with a predicate…),
 ;;; which a builtin can't do (src/builtins/mod.rs).
 ;;;
-;;; Compiled into s2 and loaded into every session. The core forms the
+;;; Compiled into s3 and loaded into every session. The core forms the
 ;;; expander implements itself are quote, quasiquote, lambda, define, set!,
 ;;; if, begin, let (and named let), letrec, letrec*, define-syntax,
-;;; let-syntax, letrec-syntax and syntax-rules (src/compile/expand.rs).
+;;; let-syntax, letrec-syntax and syntax-rules (scheme/compiler/expand.scm).
 ;;;
 ;;; Identifiers these templates introduce, such as `if`, `let` and `memv`,
 ;;; mean what they mean here, at top level, whatever the code that uses
@@ -274,7 +274,7 @@
   (raise (%make-error-object message irritants)))
 
 ;; guard (R7RS §4.2.7). R7RS's reference implementation captures a full
-;; continuation on entry and another to re-raise, which for s2's copied
+;; continuation on entry and another to re-raise, which for s3's copied
 ;; stacks costs time in proportion to the stack depth: quadratic for nested
 ;; guards. This one costs constant time per guard (plan/phases/P7.md):
 ;; - the body runs under an escape-only continuation, which is free;
@@ -481,26 +481,6 @@
 
 ;;; ---------------------------------------------------------------------
 ;;; Loading (R7RS §6.12, §5.6) and leaving (§6.14).
-
-;; Load a library file, for an import that needs one (src/libraries.rs):
-;; marked loaded first, so a library that imports itself can't loop. Its
-;; compiled code runs, loading first any library file it needs. A file
-;; that can't be compiled ahead has its forms evaluated one by one in the
-;; interaction environment instead, which also reports its errors.
-(define (%load-library path)
-  (%library-file-loading path)
-  (let retry ()
-    (let ((compiled (%compiled-library path)))
-      (cond ((string? compiled) (%load-library compiled) (retry))
-            (compiled (for-each (lambda (thunk) (thunk)) compiled))
-            (else (for-each (lambda (form) (eval form (interaction-environment)))
-                            (%read-library-file path)))))))
-
-;; What eval becomes when its expression imports a library whose file
-;; isn't loaded yet.
-(define (%load-then-eval path expr env)
-  (%load-library path)
-  (eval expr env))
 
 (define (load filename . env)
   (let ((env (if (null? env) (interaction-environment) (car env))))

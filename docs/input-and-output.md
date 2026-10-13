@@ -30,7 +30,7 @@ The current input port is standard input even while a file is being loaded, so `
 ## Opening and closing
 
 * `(open-input-file name)`, `(open-binary-input-file name)`: a file that can't be opened raises a `file-error?` error naming it.
-* `(open-output-file name)`, `(open-binary-output-file name)`: create or truncate the file. Output to a file is buffered; the buffer is written when the port is flushed or closed, and every open file port is flushed when s2 exits, however it exits.
+* `(open-output-file name)`, `(open-binary-output-file name)`: create or truncate the file. Output to a file is buffered; the buffer is written when the port is flushed or closed, and every open file port is flushed when s3 exits, however it exits.
 * `(open-input-string string)`, `(open-output-string)`, `(get-output-string port)`: string ports.
 * `(open-input-bytevector bv)`, `(open-output-bytevector)`, `(get-output-bytevector port)`: bytevector ports.
 * `(close-port port)`, `(close-input-port port)`, `(close-output-port port)`: a closed port can't be read or written, but still answers the port predicates.

@@ -54,7 +54,7 @@ pub enum PortKind {
     },
     /// Output to a file, textual or binary, buffered. The buffer is
     /// written when the port is flushed, closed or collected, and before
-    /// s2 exits (`Heap::flush_ports`), so nothing is lost if a program
+    /// s3 exits (`Heap::flush_ports`), so nothing is lost if a program
     /// exits without closing it.
     FileOutput {
         /// The file name, for printing the port.
@@ -231,7 +231,7 @@ fn utf8_char_width(first: u8) -> usize {
 }
 
 /// Write `text` to standard output. If standard output is a pipe whose
-/// reader has gone (`s2 prog.scm | head`), end s2 quietly, as such a pipe
+/// reader has gone (`s3 prog.scm | head`), end s3 quietly, as such a pipe
 /// ends `cat`: flush the open file ports, as every exit does, and exit
 /// with 141, the status a shell gives a program killed by SIGPIPE.
 pub fn write_stdout(heap: &crate::heap::Heap, text: &str) {

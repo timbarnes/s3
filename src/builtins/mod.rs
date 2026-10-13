@@ -91,9 +91,6 @@ pub enum PrimFn {
     Apply,
     CallCc,
     CallEc,
-    /// `eval`, which the call instruction carries out too: it compiles the
-    /// expression and calls the result in place of itself.
-    Eval,
 }
 
 /// A procedure written in Rust: its name, its argument count, and its code.
@@ -238,7 +235,7 @@ mod tests {
             Value::EOF,
             // A string that is also a harmless file name, since
             // open-output-file and delete-file get it too.
-            heap.string("target/s2-builtin-test-sample"),
+            heap.string("target/s3-builtin-test-sample"),
             heap.intern("sym"),
             heap.list(vec![Value::fixnum(1).unwrap(), Value::fixnum(2).unwrap()]),
             heap.vector(vec![Value::char('a')]),
@@ -260,7 +257,7 @@ mod tests {
                         let _ = match p.f {
                             PrimFn::Builtin(f) => f(&mut heap, &args),
                             PrimFn::Vm(f) => f(&mut vm, &mut heap, &args),
-                            PrimFn::Apply | PrimFn::CallCc | PrimFn::CallEc | PrimFn::Eval => continue,
+                            PrimFn::Apply | PrimFn::CallCc | PrimFn::CallEc => continue,
                         };
                     }
                 }

@@ -1,10 +1,10 @@
 ;; Ported from s1's scheme/advanced_tests.scm, with these changes:
 ;; - displayln (an s1 extension) becomes display and newline;
-;; - s2's wording of the unbound-variable error;
+;; - s3's wording of the unbound-variable error;
 ;; - left out: a define as the only form of a guard body (s1 defines a
 ;;   global; in R7RS a body needs an expression), and a macro redefined
-;;   after code using it was compiled (s2 expands when it compiles, P5);
-;; - the malformed let, which s2 reports when it compiles the form, is
+;;   after code using it was compiled (s3 expands when it compiles, P5);
+;; - the malformed let, which s3 reports when it compiles the form, is
 ;;   compiled by eval, so it still raises at each call.
 
 (display "          === Testing let, let* and letrec ===")

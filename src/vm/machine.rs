@@ -44,8 +44,6 @@
 //! Only an error nobody handles comes out of `run`, through `%abort`.
 
 use crate::builtins::{Error, ErrorKind, PrimFn, Primitive, list, number, predicate, standard_ports, vector};
-#[cfg(feature = "rust-compiler")]
-use crate::compile;
 use crate::globals::{TopBinding, cell_name, cell_value, env_of};
 use crate::heap::{GcRef, Heap, Obj, list_to_vec};
 use crate::printer::{display_value, print_value};
@@ -648,43 +646,6 @@ impl Vm {
                                     self.stack[base + 1] = k;
                                     continue;
                                 }
-                                // With the compiler in Scheme, s2 binds eval to its
-                                // eval-form instead.
-                                #[cfg(not(feature = "rust-compiler"))]
-                                PrimFn::Eval => fail!('run, "eval: the compiler isn't loaded"),
-                                #[cfg(feature = "rust-compiler")]
-                                PrimFn::Eval => {
-                                    let n = self.stack.len() - base - 1;
-                                    if n != 2 {
-                                        fail!('run, format!("eval: wrong number of arguments: {}", n));
-                                    }
-                                    let (expr, env) = (self.stack[base + 1], self.stack[base + 2]);
-                                    if !matches!(env.as_obj().map(|o| &o.kind), Some(Obj::Environment(_))) {
-                                        fail!('run, "eval: the second argument must be an environment");
-                                    }
-                                    match compile::compile(heap, env.as_ref().unwrap(), expr) {
-                                        Ok(template) => {
-                                            // Call the compiled thunk in place of eval.
-                                            let thunk = heap.closure(template, std::iter::empty());
-                                            self.stack.truncate(base);
-                                            self.stack.push(thunk);
-                                        }
-                                        // An import needs a library file loaded first:
-                                        // call (%load-then-eval "file" expr env) instead.
-                                        Err(e) => match heap.libraries.pending_load.take() {
-                                            Some(path) => match system_procedure(heap, "%load-then-eval") {
-                                                Some(f) => {
-                                                    let path = heap.string(&path.to_string_lossy());
-                                                    self.stack[base] = f;
-                                                    self.stack.insert(base + 1, path);
-                                                }
-                                                None => fail!('run, e),
-                                            },
-                                            None => fail!('run, e),
-                                        },
-                                    }
-                                    continue;
-                                }
                                 _ => match self.call_primitive(heap, p, base) {
                                     Ok(result) if tail => {
                                         do_return!(result);
@@ -924,7 +885,7 @@ impl Vm {
                 let args = self.stack[base + 1..].to_vec();
                 f(self, heap, &args)
             }
-            PrimFn::Apply | PrimFn::CallCc | PrimFn::CallEc | PrimFn::Eval => unreachable!("handled by the call instructions"),
+            PrimFn::Apply | PrimFn::CallCc | PrimFn::CallEc => unreachable!("handled by the call instructions"),
         }
     }
 }
@@ -937,8 +898,7 @@ fn stack_overflow() -> String {
 }
 
 /// The procedure `name` in the system environment, if `scheme/core.scm` has
-/// defined it: `%raise-error`, which errors are raised through, and
-/// `%load-then-eval`.
+/// defined it: `%raise-error`, which errors are raised through.
 fn system_procedure(heap: &mut Heap, name: &str) -> Option<Value> {
     let name = heap.intern(name).as_ref().unwrap();
     match env_of(heap.system?).borrow().lookup(name)? {

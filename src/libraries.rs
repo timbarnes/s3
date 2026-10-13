@@ -8,24 +8,19 @@
 //!
 //! The standard libraries have no code of their own. Each is a list of the
 //! names R7RS assigns it (appendix A), exported straight from the system
-//! environment. Names s2 doesn't implement are left out and recorded, so a
-//! test can list them. `(s2)` exports the rest of the system environment.
+//! environment. Names s3 doesn't implement are left out and recorded, so a
+//! test can list them. `(s3)` exports the rest of the system environment.
 //!
 //! Imports, `define-library`, `include` and `cond-expand` act when a form
-//! is expanded (`compile/expand.rs`), using the functions here. A library
-//! file is loaded the first time an import needs it: the expander records
-//! the file in `pending_load` and fails, and its caller loads the file (in
-//! Scheme, `%load-library`) and expands the form again.
+//! is expanded (`scheme/compiler/`), through the primitives here. A library
+//! file is loaded the first time an import needs it, by the compiler's
+//! `load-library`.
 
 use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::builtins::{Error, Primitive, err, expected, kind, list_arg, prim, string_arg};
-#[cfg(feature = "rust-compiler")]
-use crate::compile::generate;
-#[cfg(feature = "rust-compiler")]
-use crate::compile::expand::expand;
 use crate::compile::syntax_rules::{identifier, name as id_name, strip};
 use crate::fasl;
 use crate::globals::{Env, TopBinding, cell_value, env_of};
@@ -46,7 +41,7 @@ pub struct Library {
     /// The environment a `define-library` body ran in; None for a standard
     /// library.
     pub env: Option<GcRef>,
-    /// Names a standard library should export that s2 doesn't define.
+    /// Names a standard library should export that s3 doesn't define.
     pub unimplemented: Vec<&'static str>,
 }
 
@@ -55,10 +50,6 @@ pub struct Library {
 pub struct Libraries {
     table: FxHashMap<LibraryName, Library>,
     loaded: FxHashSet<PathBuf>,
-    /// A library file an import needs loaded before the Rust expander can
-    /// expand it (see the module comment).
-    #[cfg(feature = "rust-compiler")]
-    pub pending_load: Option<PathBuf>,
     /// While a library file is compiled: every file read, for the compiled
     /// file's staleness check.
     reading: Option<Vec<PathBuf>>,
@@ -228,7 +219,7 @@ const STANDARD_LIBRARIES: &[(&[&str], &[&str])] = &[
     ]),
 ];
 
-/// Register the standard libraries, and `(s2)`, over the system
+/// Register the standard libraries, and `(s3)`, over the system
 /// environment's bindings. Called once, after `scheme/core.scm` has loaded.
 pub fn register_standard_libraries(heap: &mut Heap, system: GcRef) {
     let bindings: FxHashMap<GcRef, TopBinding> = env_of(system).borrow().bindings().collect();
@@ -247,7 +238,7 @@ pub fn register_standard_libraries(heap: &mut Heap, system: GcRef) {
         let name = name.iter().map(|part| part.to_string()).collect();
         heap.libraries.insert(name, Library { exports, env: None, unimplemented });
     }
-    // (s2): everything else, in name order. Not the hidden definitions
+    // (s3): everything else, in name order. Not the hidden definitions
     // that macros make under aliases (`define-record-type`'s `index`).
     let mut rest: Vec<(GcRef, TopBinding)> = bindings
         .into_iter()
@@ -256,7 +247,7 @@ pub fn register_standard_libraries(heap: &mut Heap, system: GcRef) {
         })
         .collect();
     rest.sort_by_key(|&(symbol, _)| id_name(symbol).to_string());
-    heap.libraries.insert(vec!["s2".to_string()], Library { exports: rest, env: None, unimplemented: Vec::new() });
+    heap.libraries.insert(vec!["s3".to_string()], Library { exports: rest, env: None, unimplemented: Vec::new() });
 }
 
 /// Whether a binding means something: a variable that is unbound (a cell
@@ -305,16 +296,11 @@ pub fn library_to_load(heap: &Heap, name: &LibraryName, who: &str) -> Result<Opt
     }
 }
 
-/// The library named `name`, loading its file if it has one that hasn't
-/// been loaded: in that case the file is recorded in `pending_load` and the
-/// result is an error, for the caller to load the file and try again.
+/// The library named `name`. One whose file hasn't been loaded is an
+/// error: `environment` can't load it.
 fn find_library<'a>(heap: &'a mut Heap, name: &LibraryName, who: &str) -> Result<&'a Library, String> {
     if let Some(path) = library_to_load(heap, name, who)? {
         let message = format!("{}: loading {}", who, path.display());
-        #[cfg(feature = "rust-compiler")]
-        {
-            heap.libraries.pending_load = Some(path);
-        }
         return Err(message);
     }
     Ok(heap.libraries.get(name).unwrap())
@@ -378,60 +364,6 @@ pub fn resolve_import_set(heap: &mut Heap, set: Value, who: &str) -> Result<Vec<
 // ---------------------------------------------------------------------------
 // define-library declarations and include
 
-#[cfg(feature = "rust-compiler")]
-/// What a `define-library`'s declarations add up to.
-#[derive(Default)]
-pub struct Declarations {
-    /// (internal, external) names.
-    pub exports: Vec<(Value, Value)>,
-    /// The import sets, in order.
-    pub imports: Vec<Value>,
-    /// The body forms, from `begin` and `include` declarations, in order.
-    pub body: Vec<Value>,
-}
-
-#[cfg(feature = "rust-compiler")]
-/// Add the library declarations `decls` to `out`, expanding
-/// `include-library-declarations` and `cond-expand`. Declarations are
-/// recognised by name, as in s1: they aren't bindings anywhere.
-pub fn collect_declarations(heap: &mut Heap, decls: &[Value], out: &mut Declarations) -> Result<(), String> {
-    let who = "define-library";
-    for &decl in decls {
-        let parts = list_to_vec(decl).ok_or_else(|| format!("{}: not a declaration: {}", who, print_value(decl)))?;
-        let keyword = parts.first().and_then(|&k| identifier(k)).map(id_name).unwrap_or("");
-        let args = &parts[1.min(parts.len())..];
-        match keyword {
-            "export" => {
-                for &spec in args {
-                    if identifier(spec).is_some() {
-                        out.exports.push((spec, spec));
-                        continue;
-                    }
-                    match list_to_vec(spec).as_deref() {
-                        Some(&[kw, internal, external]) if identifier(kw).map(id_name) == Some("rename") => {
-                            out.exports.push((internal, external))
-                        }
-                        _ => return Err(format!("{}: bad export spec {}", who, print_value(spec))),
-                    }
-                }
-            }
-            "import" => out.imports.extend_from_slice(args),
-            "begin" => out.body.extend_from_slice(args),
-            "include" | "include-ci" => out.body.extend(include_forms(heap, args, keyword == "include-ci", keyword)?),
-            "include-library-declarations" => {
-                let forms = include_forms(heap, args, false, keyword)?;
-                collect_declarations(heap, &forms, out)?;
-            }
-            "cond-expand" => {
-                let chosen = choose_cond_expand_clause(heap, args, who)?;
-                collect_declarations(heap, &chosen, out)?;
-            }
-            _ => return Err(format!("{}: unknown declaration {}", who, print_value(decl))),
-        }
-    }
-    Ok(())
-}
-
 /// Every datum in the file `name`, read with case folding for
 /// `include-ci`. Relative names are relative to the current directory.
 pub fn read_file_forms(heap: &mut Heap, name: &str, fold_case: bool, who: &str) -> Result<Vec<Value>, String> {
@@ -453,38 +385,22 @@ pub fn read_file_forms(heap: &mut Heap, name: &str, fold_case: bool, who: &str) 
     }
 }
 
-#[cfg(feature = "rust-compiler")]
-/// The forms of the files named by `files`, strings, in order: what
-/// `include` and `include-ci` splice in.
-pub fn include_forms(heap: &mut Heap, files: &[Value], fold_case: bool, who: &str) -> Result<Vec<Value>, String> {
-    if files.is_empty() {
-        return Err(format!("{}: expects at least one file name", who));
-    }
-    let mut forms = Vec::new();
-    for &file in files {
-        let Some(Obj::Str(name)) = kind(file) else { return Err(format!("{}: file names must be strings", who)) };
-        let name = name.borrow().to_string();
-        forms.extend(read_file_forms(heap, &name, fold_case, who)?);
-    }
-    Ok(forms)
-}
-
 // ---------------------------------------------------------------------------
 // Library files
 
 /// The directories searched for library files, in order: those in
-/// `S2_LIBRARY_PATH` (separated as `PATH` is), the current directory, and
-/// the installation's `<prefix>/share/s2/lib` for a binary in
+/// `S3_LIBRARY_PATH` (separated as `PATH` is), the current directory, and
+/// the installation's `<prefix>/share/s3/lib` for a binary in
 /// `<prefix>/bin`.
 // ponytail: s1 also searches the user's data directory, through the `dirs`
 // crate; add it if anyone installs libraries per user.
 fn search_path() -> Vec<PathBuf> {
-    let mut path: Vec<PathBuf> = std::env::var_os("S2_LIBRARY_PATH")
+    let mut path: Vec<PathBuf> = std::env::var_os("S3_LIBRARY_PATH")
         .map(|p| std::env::split_paths(&p).filter(|d| !d.as_os_str().is_empty()).collect())
         .unwrap_or_default();
     path.push(".".into());
     if let Some(prefix) = std::env::current_exe().ok().and_then(|exe| exe.parent()?.parent().map(Path::to_path_buf)) {
-        path.push(prefix.join("share").join("s2").join("lib"));
+        path.push(prefix.join("share").join("s3").join("lib"));
     }
     path
 }
@@ -510,44 +426,6 @@ fn read_library_file(heap: &mut Heap, path: &str) -> Result<Vec<Value>, String> 
 fn thunks(heap: &mut Heap, templates: Vec<GcRef>) -> Value {
     let thunks = templates.into_iter().map(|t| heap.closure(t, std::iter::empty())).collect();
     heap.list(thunks)
-}
-
-#[cfg(feature = "rust-compiler")]
-/// The compiled code of the library file `path`, from `foo/bar.s2o` next
-/// to `foo/bar.sld` if that is fresh (`fasl::fresh`), or else compiled now
-/// and cached there. Compiling doesn't run anything, so the file's forms
-/// are expanded before any of them runs. Writing the cache is best effort.
-fn compiled_library(heap: &mut Heap, path: &str) -> Result<Vec<GcRef>, String> {
-    let target = heap.interaction.unwrap();
-    let cache = Path::new(path).with_extension("s2o");
-    match fasl::read_cached(heap, target, &cache) {
-        Some(fasl::Loaded::Code(templates)) => return Ok(templates),
-        Some(fasl::Loaded::Needs(path)) => {
-            heap.libraries.pending_load = Some(path);
-            return Err("load: a library is needed first".into());
-        }
-        None => {}
-    }
-    heap.libraries.reading = Some(Vec::new());
-    // A program being compiled may be recording its own changes to the
-    // same environment: they wait while this file is compiled.
-    let outer = env_of(target).borrow_mut().touched.replace(Vec::new());
-    let result = (|| {
-        let mut templates = Vec::new();
-        for form in read_library_file(heap, path)? {
-            let ast = expand(heap, target, form)?;
-            templates.push(generate(heap, &ast));
-        }
-        Ok(templates)
-    })();
-    let sources = heap.libraries.reading.take().unwrap_or_default();
-    if let Ok(templates) = &result
-        && let Ok(bytes) = fasl::write(heap, target, templates, &sources)
-    {
-        fasl::write_cache(&cache, &bytes);
-    }
-    env_of(target).borrow_mut().touched = outer;
-    result
 }
 
 /// `form`, if it is a `define-library`, with its include declarations'
@@ -586,9 +464,9 @@ fn relocate_includes(heap: &mut Heap, form: Value, dir: &Path) -> Value {
 // ---------------------------------------------------------------------------
 // cond-expand and features
 
-/// s2's feature identifiers (R7RS appendix B).
+/// s3's feature identifiers (R7RS appendix B).
 fn feature_names() -> Vec<String> {
-    let mut names: Vec<String> = ["r7rs", "exact-closed", "ieee-float", "full-unicode", "ratios", "s2"].iter().map(|f| f.to_string()).collect();
+    let mut names: Vec<String> = ["r7rs", "exact-closed", "ieee-float", "full-unicode", "ratios", "s3"].iter().map(|f| f.to_string()).collect();
     names.push(std::env::consts::OS.to_string());
     names.push(std::env::consts::FAMILY.to_string());
     if std::env::consts::FAMILY == "unix" {
@@ -600,72 +478,6 @@ fn feature_names() -> Vec<String> {
     names
 }
 
-#[cfg(feature = "rust-compiler")]
-/// Whether a cond-expand requirement holds: a feature identifier,
-/// `(library name)` for a library that is registered or has a file on the
-/// search path, or `and` / `or` / `not` of requirements.
-fn requirement_holds(heap: &Heap, req: Value, features: &[String], who: &str) -> Result<bool, String> {
-    let bad = || format!("{}: bad feature requirement {}", who, print_value(req));
-    if let Some(id) = identifier(req) {
-        return Ok(features.iter().any(|f| f == id_name(id)));
-    }
-    let parts = list_to_vec(req).filter(|p| !p.is_empty()).ok_or_else(bad)?;
-    let args = &parts[1..];
-    match identifier(parts[0]).map(id_name) {
-        Some("and") => {
-            for &r in args {
-                if !requirement_holds(heap, r, features, who)? {
-                    return Ok(false);
-                }
-            }
-            Ok(true)
-        }
-        Some("or") => {
-            for &r in args {
-                if requirement_holds(heap, r, features, who)? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-        Some("not") => match args {
-            [r] => Ok(!requirement_holds(heap, *r, features, who)?),
-            _ => Err(bad()),
-        },
-        Some("library") => match args {
-            [name] => {
-                let name = library_name(*name, who)?;
-                Ok(heap.libraries.get(&name).is_some() || find_library_file(&name).is_some())
-            }
-            _ => Err(bad()),
-        },
-        _ => Err(bad()),
-    }
-}
-
-#[cfg(feature = "rust-compiler")]
-/// The body of the first cond-expand clause whose requirement holds (an
-/// `else` clause, last, always does), or nothing if none does.
-pub fn choose_cond_expand_clause(heap: &Heap, clauses: &[Value], who: &str) -> Result<Vec<Value>, String> {
-    let features = feature_names();
-    for (i, &clause) in clauses.iter().enumerate() {
-        let parts = list_to_vec(clause).unwrap_or_default();
-        let Some(&req) = parts.first() else { return Err(format!("{}: bad clause {}", who, print_value(clause))) };
-        let holds = if identifier(req).map(id_name) == Some("else") {
-            if i + 1 != clauses.len() {
-                return Err(format!("{}: else must be the last clause", who));
-            }
-            true
-        } else {
-            requirement_holds(heap, req, &features, who)?
-        };
-        if holds {
-            return Ok(parts[1..].to_vec());
-        }
-    }
-    Ok(Vec::new())
-}
-
 // ---------------------------------------------------------------------------
 // Builtins
 
@@ -675,10 +487,6 @@ pub static PRIMITIVES: &[Primitive] = &[
         for &set in a {
             let resolved = resolve_import_set(h, set, "environment");
             // environment doesn't load library files (as in s1).
-            #[cfg(feature = "rust-compiler")]
-            {
-                h.libraries.pending_load = None;
-            }
             bindings.extend(resolved?);
         }
         Ok(environment_value(h, bindings))
@@ -736,7 +544,7 @@ pub static PRIMITIVES: &[Primitive] = &[
     prim("%cached-library", 1, Some(1), |h, a| {
         let path = string_arg(a[0], "%cached-library")?.borrow().to_string();
         let target = h.interaction.unwrap();
-        Ok(match fasl::read_cached(h, target, &Path::new(&path).with_extension("s2o")) {
+        Ok(match fasl::read_cached(h, target, &Path::new(&path).with_extension("s3o")) {
             Some(fasl::Loaded::Code(templates)) => thunks(h, templates),
             Some(fasl::Loaded::Needs(needed)) => h.string(&needed.to_string_lossy()),
             None => Value::FALSE,
@@ -764,34 +572,13 @@ pub static PRIMITIVES: &[Primitive] = &[
                 .map(|t| t.as_ref().filter(|r| matches!(r.get().kind, Obj::Template(_))).ok_or_else(|| expected("%library-compile-end", "a template", t)))
                 .collect::<Result<Vec<_>, _>>()?;
             if let Ok(bytes) = fasl::write(h, target, &templates, &sources) {
-                fasl::write_cache(&Path::new(&path).with_extension("s2o"), &bytes);
+                fasl::write_cache(&Path::new(&path).with_extension("s3o"), &bytes);
             }
         }
         let (touched, reading) = h.libraries.compiling.pop().unwrap_or_default();
         env_of(target).borrow_mut().touched = touched;
         h.libraries.reading = reading;
         Ok(Value::UNSPECIFIED)
-    }),
-    // For %load-library: the library file's code, compiled, as a list of
-    // procedures to call in order; or the file of a library it needs
-    // loaded first; or #f if it can't be compiled ahead. Without the Rust
-    // compiler it is never called, but stays bound, so that core.scm, which
-    // refers to it, compiles to the same image in either build.
-    prim("%compiled-library", 1, Some(1), |h, a| {
-        let path = string_arg(a[0], "%compiled-library")?.borrow().to_string();
-        #[cfg(feature = "rust-compiler")]
-        return Ok(match compiled_library(h, &path) {
-            Ok(templates) => thunks(h, templates),
-            Err(_) => match h.libraries.pending_load.take() {
-                Some(needed) => h.string(&needed.to_string_lossy()),
-                None => Value::FALSE,
-            },
-        });
-        #[cfg(not(feature = "rust-compiler"))]
-        {
-            let _ = h;
-            Err(err!("%compiled-library: s2 was built without the Rust compiler: {}", path))
-        }
     }),
     prim("%read-library-file", 1, Some(1), |h, a| {
         let path = string_arg(a[0], "%read-library-file")?.borrow().to_string();

@@ -1,10 +1,10 @@
-# Test threads get the same large stack as the s2 binary's session thread
-# (src/main.rs, STACK_SIZE): expansion and code generation recurse over
-# deeply nested code.
+# Test threads get the same large stack as the s3 binary's session thread
+# (src/main.rs, STACK_SIZE): the reader, printer and equal? recurse over
+# deeply nested data.
 [env]
 RUST_MIN_STACK = "1073741824"
 
 # cargo doc documents private items too: the internal docs are for working
-# on s2 (published under api/ by .github/workflows/docs.yml).
+# on s3 (published under api/ by .github/workflows/docs.yml).
 [build]
 rustdocflags = ["--document-private-items"]

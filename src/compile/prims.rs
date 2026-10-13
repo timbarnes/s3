@@ -1,13 +1,10 @@
 //! What the front end in Scheme (`scheme/compiler/`) uses of the runtime
 //! (plan/08, C3): aliases, top-level environments and their cells, macros,
 //! the library registry, and reading the files `include` names. These stay
-//! Rust objects, shared with the VM, compiled files and the Rust front end.
+//! Rust objects, shared with the VM and compiled files.
 //!
 //! A binding, as data: `(variable . cell)`, `(macro . m)` or `(core .
 //! name)`, where `name` is the core form's symbol.
-//!
-//! Errors carry the Rust front end's messages exactly, so the two front
-//! ends report the same.
 
 use std::path::Path;
 

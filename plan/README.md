@@ -7,7 +7,7 @@ paper, measure where possible, then implement in small steps.
 For using s2, see the [user guide](https://timbarnes.github.io/s2/) (source
 in `docs/`).
 
-**Status:** P0-P7 done 2026-10-10, P8-P12 2026-10-11 ([P0](phases/P0.md), [P1](phases/P1.md), [P2](phases/P2.md), [P3](phases/P3.md), [P4](phases/P4.md), [P5](phases/P5.md), [P6](phases/P6.md), [P7](phases/P7.md), [P8](phases/P8.md), [P9](phases/P9.md), [P10](phases/P10.md), [P11](phases/P11.md), [P12](phases/P12.md)). P13, planned in [08](08-compiler-in-scheme.md), is done: [P13.0-P13.6](phases/P13.md) 2026-10-12 and 2026-10-13 (P13.2 folded into P13.1). **s2 is frozen at P13** (tag `s2-final`), with both compilers; work continues in s3, which keeps only the compiler in Scheme.
+**Status:** P0-P7 done 2026-10-10, P8-P12 2026-10-11 ([P0](phases/P0.md), [P1](phases/P1.md), [P2](phases/P2.md), [P3](phases/P3.md), [P4](phases/P4.md), [P5](phases/P5.md), [P6](phases/P6.md), [P7](phases/P7.md), [P8](phases/P8.md), [P9](phases/P9.md), [P10](phases/P10.md), [P11](phases/P11.md), [P12](phases/P12.md)). P13, planned in [08](08-compiler-in-scheme.md), is done: [P13.0-P13.6](phases/P13.md) 2026-10-12 and 2026-10-13 (P13.2 folded into P13.1). **s2 is frozen at P13** (tag `s2-final`), with both compilers; work continues in s3, which keeps only the compiler in Scheme. **s3:** [S0](09-s3.md#s0-the-rust-compiler-goes) done 2026-10-13: the Rust compiler is gone, the boot images are committed, and a verifier checks every template.
 
 ## Goals
 
@@ -47,6 +47,7 @@ in `docs/`).
 | [06-directions.md](06-directions.md) | Written after P10: the compiler in Scheme here or in a fork, a reduced runtime, comparing with other Schemes, embedded targets, native code |
 | [07-comparison.md](07-comparison.md) | P12: s2 against eight other Schemes and s1, in architecture, completeness, features and performance |
 | [08-compiler-in-scheme.md](08-compiler-in-scheme.md) | The plan for P13: the decisions to settle, sub-phases P13.0-P13.6 and their exit tests, and the risks |
+| [09-s3.md](09-s3.md) | s3: S0 removes the Rust compiler, commits the boot images and adds a verifier; what follows |
 
 Read them in order the first time. During implementation, 04 is the working
 document, and 03 is the reference for why things are shaped as they are.

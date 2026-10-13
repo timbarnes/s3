@@ -1,7 +1,7 @@
 ;; port_tests.scm: ports and I/O (R7RS 6.13), and the printer through them.
 ;; Ported from s1's scheme/port_tests.scm, leaving out s1's extensions:
 ;; procedure-source, its printing of special forms, and its naming of an
-;; anonymous procedure after the first variable it is defined to (s2 names
+;; anonymous procedure after the first variable it is defined to (s3 names
 ;; procedures when they are compiled, P2).
 (display "          === Testing ports ===")
 (newline)
@@ -59,7 +59,7 @@
     "the current output port must be an output port")
 
 ;; --- files
-(define port-test-file "target/s2-port-test.tmp")
+(define port-test-file "target/s3-port-test.tmp")
 (with-output-to-file port-test-file (lambda () (display "file text") (newline) (write '(1 "two"))))
 (test-equal '("file text" (1 "two"))
     (with-input-from-file port-test-file (lambda () (list (read-line) (read))))

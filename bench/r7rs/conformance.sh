@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Run chibi's R7RS suite (tests/r7rs) on s2 and other Schemes (plan/04 P12).
+# Run chibi's R7RS suite (tests/r7rs) on s3 and other Schemes (plan/04 P12).
 #
 #   bench/r7rs/conformance.sh [SYSTEMS]
 #
-# As tests/r7rs/run.sh does for s2: the suite is split into sections, and
+# As tests/r7rs/run.sh does for s3: the suite is split into sections, and
 # each runs alone, as a program made of the suite's imports, shim.scm (in
 # place of (chibi test)), the section and a summary call. Here every system
-# runs it as a program, s2 too, so a top-level error ends a section on all
-# of them alike; tests/r7rs/run.sh uses s2's `-f`, which carries on, so its
+# runs it as a program, s3 too, so a top-level error ends a section on all
+# of them alike; tests/r7rs/run.sh uses s3's `-f`, which carries on, so its
 # counts are a little higher. Prints a Markdown table of tests passed per
 # section, and the full output goes to target/r7rs-conformance/.
 
@@ -19,20 +19,20 @@ tests="$root/tests/r7rs"
 # Not Chez: it is an R6RS system, whose reader rejects R7RS syntax such as
 # #u8(...), and chez/ has only what the benchmarks need. Not s7, which
 # has no `import`.
-systems="${1:-s2 s1 chibi guile gauche chicken gambit racket}"
+systems="${1:-s3 s1 chibi guile gauche chicken gambit racket}"
 S1="${S1:-$root/../s1/target/release/s1}"
 out="$root/target/r7rs-conformance"
 rm -rf "$out"
 mkdir -p "$out"
 
-if [[ " $systems " == *" s2 "* ]]; then
+if [[ " $systems " == *" s3 "* ]]; then
     (cd "$root" && cargo build --release -q) || exit 1
 fi
 
 run() {
     local sys=$1 f=$2
     case $sys in
-        s2) "$root/target/release/s2" "$f" ;;
+        s3) "$root/target/release/s3" "$f" ;;
         s1) "$S1" -q "$f" ;;
         chibi) chibi-scheme "$f" ;;
         guile) guile --r7rs --no-auto-compile "$f" ;;

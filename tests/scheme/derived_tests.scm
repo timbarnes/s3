@@ -1,4 +1,4 @@
-;; Ported from s1's scheme/derived_tests.scm, with s2's wording of arity
+;; Ported from s1's scheme/derived_tests.scm, with s3's wording of arity
 ;; errors, which name the procedure and the expected count.
 
 ;; derived_tests.scm: R7RS derived expression types (4.2), case-lambda,

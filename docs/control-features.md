@@ -4,7 +4,7 @@ R7RS: [section 6.10, Control features](https://standards.scheme.org/corrected-r7
 
 ## Proper tail calls
 
-s2 is properly tail-recursive: a procedure call in tail position reuses the caller's continuation, so a loop written as a tail call runs in constant space however many times it repeats. The tail positions are the last expression of a `lambda` or `case-lambda` body; the branches of `if`, `cond` (including `=>`), `case`, `when` and `unless`; the last expression of `and`, `or` and `begin`; the bodies of every `let` form, named `let`, `let-values`, `let-syntax` and `letrec-syntax`; a `do` loop's result expressions; and macro uses in any of these. `apply` and `call/cc` call their procedure, `call-with-values` its consumer, and `eval` its compiled expression, in tail position.
+s3 is properly tail-recursive: a procedure call in tail position reuses the caller's continuation, so a loop written as a tail call runs in constant space however many times it repeats. The tail positions are the last expression of a `lambda` or `case-lambda` body; the branches of `if`, `cond` (including `=>`), `case`, `when` and `unless`; the last expression of `and`, `or` and `begin`; the bodies of every `let` form, named `let`, `let-values`, `let-syntax` and `letrec-syntax`; a `do` loop's result expressions; and macro uses in any of these. `apply` and `call/cc` call their procedure, `call-with-values` its consumer, and `eval` its compiled expression, in tail position.
 
 Calls inside `guard`, `parameterize`, `dynamic-wind` and `with-exception-handler` bodies aren't tail calls, since those forms must do something after the body returns.
 
@@ -19,7 +19,7 @@ Recursion that isn't in tail position can go about 20 million calls deep for a s
 
 ## `map` and `for-each`
 
-`(map proc list1 list2 ...)` returns a list of the results of applying `proc` to corresponding elements of the lists. `(for-each proc list1 list2 ...)` does the same for effect, in order from first to last. Both stop at the end of the shortest list, so a circular list can be paired with a finite one. s2's `map` also applies `proc` in order, though R7RS doesn't require that.
+`(map proc list1 list2 ...)` returns a list of the results of applying `proc` to corresponding elements of the lists. `(for-each proc list1 list2 ...)` does the same for effect, in order from first to last. Both stop at the end of the shortest list, so a circular list can be paired with a finite one. s3's `map` also applies `proc` in order, though R7RS doesn't require that.
 
 `string-map`, `string-for-each`, `vector-map` and `vector-for-each` are the same for strings and vectors; see [Strings](./strings.md#iteration) and [Vectors](./vectors.md).
 

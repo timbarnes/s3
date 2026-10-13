@@ -2,43 +2,43 @@
 
 R7RS: [section 6.14, System interface](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-8.html#TAG:__tex2page_sec_6.14). It covers `(scheme process-context)`, `(scheme time)`, and `load` from `(scheme load)`. `file-exists?` and `delete-file` are in [Input and Output](./input-and-output.md), and `features` in [Libraries](./libraries.md#cond-expand-and-features).
 
-## Running s2
+## Running s3
 
 ```
-s2 [FLAGS]                  REPL on standard input
-s2 [FLAGS] -e TEXT          evaluate each form in TEXT, writing each result
-s2 [FLAGS] -f FILE          evaluate each form in FILE; an error is reported
+s3 [FLAGS]                  REPL on standard input
+s3 [FLAGS] -e TEXT          evaluate each form in TEXT, writing each result
+s3 [FLAGS] -f FILE          evaluate each form in FILE; an error is reported
                             and the next form runs
-s2 [FLAGS] PROGRAM ARG ...  run a program; PROGRAM may be source or compiled
-s2 --compile FILE [-o OUT]  compile the program FILE to OUT (by default FILE
-                            with the extension .s2o), without running it
+s3 [FLAGS] PROGRAM ARG ...  run a program; PROGRAM may be source or compiled
+s3 --compile FILE [-o OUT]  compile the program FILE to OUT (by default FILE
+                            with the extension .s3o), without running it
 ```
 
-* **A program** runs, and s2 exits when it finishes. Everything after the program's name, including words that start with `-`, is passed to the program, and `command-line` returns it. The first error ends the program with status 70 (`EX_SOFTWARE`), after the `after` thunks of any `dynamic-wind` it is inside have run. The program's first line may be `#!/usr/bin/env s2` (the reader treats `#!/...` and `#! ...` as comments to the end of the line).
-* **`-e` and `-f`** are for experiments and tests: each form's result is written (`-e`) or not (`-f`), and an error is reported and the next form runs. s2 then exits with status 1 if any form failed, otherwise 0.
+* **A program** runs, and s3 exits when it finishes. Everything after the program's name, including words that start with `-`, is passed to the program, and `command-line` returns it. The first error ends the program with status 70 (`EX_SOFTWARE`), after the `after` thunks of any `dynamic-wind` it is inside have run. The program's first line may be `#!/usr/bin/env s3` (the reader treats `#!/...` and `#! ...` as comments to the end of the line).
+* **`-e` and `-f`** are for experiments and tests: each form's result is written (`-e`) or not (`-f`), and an error is reported and the next form runs. s3 then exits with status 1 if any form failed, otherwise 0.
 * **The REPL** is described in [Program Structure](./program-structure.md#the-repl).
 * **The flags** show what the compiler does with each form before it runs: `--expand` prints the core form after macro expansion, and `--dis` the compiled bytecode.
 
-If standard output is a pipe whose reader closes it, s2 ends at once, as `cat` does: `s2 prog.scm | head` stops when `head` has its lines.
+If standard output is a pipe whose reader closes it, s3 ends at once, as `cat` does: `s3 prog.scm | head` stops when `head` has its lines.
 
-s2's core library, `scheme/core.scm`, is built into the binary, so s2 runs from any directory. Its compiled form is cached next to the executable, as `s2-core.s2o`, the first time s2 runs after a build; if that file can't be written, s2 compiles the core at every start.
+s3's core library, `scheme/core.scm`, and its compiler are built into the binary, already compiled, so s3 runs from any directory and needs no other files. The environment variables `S3_CORE_IMAGE` and `S3_COMPILER_IMAGE` name other compiled images to start from instead, made with `s3 --core-image FILE` and `s3 --compiler-image FILE`.
 
 ### Compiled programs
 
-`s2 --compile prog.scm` writes `prog.s2o`, and `s2 prog.s2o arg ...` runs it as `s2 prog.scm arg ...` would, without compiling again. Compiling runs nothing of the program, except that the libraries it imports are loaded and its own `define-library` forms are run, so later forms can import them.
+`s3 --compile prog.scm` writes `prog.s3o`, and `s3 prog.s3o arg ...` runs it as `s3 prog.scm arg ...` would, without compiling again. Compiling runs nothing of the program, except that the libraries it imports are loaded and its own `define-library` forms are run, so later forms can import them.
 
-Library files are compiled the same way, automatically: the first import of `foo/bar.sld` writes `foo/bar.s2o` beside it, and later runs use that file until `foo/bar.sld` (or a file it includes) changes, or s2 is rebuilt. See [Libraries](./libraries.md#library-files).
+Library files are compiled the same way, automatically: the first import of `foo/bar.sld` writes `foo/bar.s3o` beside it, and later runs use that file until `foo/bar.sld` (or a file it includes) changes, or s3 is rebuilt. See [Libraries](./libraries.md#library-files).
 
-A compiled file records the version of its format, and s2 refuses a file of another version.
+A compiled file records the version of its format, and s3 refuses a file of another version.
 
 ## `command-line`
 
 `(command-line)`
 
-Returns the command line as a list of strings: the program's name as given, followed by its arguments. Without a program it is `("s2")`.
+Returns the command line as a list of strings: the program's name as given, followed by its arguments. Without a program it is `("s3")`.
 
 ```scheme
-;; s2 count.scm a b
+;; s3 count.scm a b
 (command-line)          ; => ("count.scm" "a" "b")
 ```
 
@@ -75,7 +75,7 @@ Returns all environment variables as a list of `(name . value)` pairs of strings
 
 `(current-second)`
 
-Returns the current time as an inexact number of seconds since the Unix epoch (1970-01-01). R7RS specifies TAI; s2 uses the system clock, which is UTC, so it differs from TAI by the leap seconds (37 in 2026).
+Returns the current time as an inexact number of seconds since the Unix epoch (1970-01-01). R7RS specifies TAI; s3 uses the system clock, which is UTC, so it differs from TAI by the leap seconds (37 in 2026).
 
 ## `current-jiffy`
 
