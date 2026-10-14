@@ -151,6 +151,87 @@ The programs: `earley`, `mperm`, `gcbench`, `nboyer`, `paraffins`,
   - whether G4 is: it is if pairs are most of the bytes.
 - **Exit:** a table of these numbers in this document.
 
+#### G0 results (2026-10-13)
+
+`--features gcstats` (`src/gcstats.rs`), a feature of its own: `stats`
+counts every instruction, which would distort the times. The r7rs
+benchmarks were run at scale 10, as in 07; peak RSS, cycles and system
+time come from `/usr/bin/time -l`.
+
+| | GC % of run (mark + sweep) | survive first GC | old in marking | pairs % | closures % | peak live | peak slots | peak RSS |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| deriv | 19.5 (5.7 + 13.8) | 0.4% | 99% | 82 | 15 | 0.5MB | 2MB | 7MB |
+| destruc | 5.3 (1.8 + 3.5) | 1.3% | 96% | 79 | 21 | 0.6MB | 2MB | 7MB |
+| paraffins | 26.6 (23.0 + 3.6) | 99.6% | 33% | 50 | 0 (vectors 50) | 742MB | 743MB | 1.2GB |
+| nboyer | 9.1 (5.0 + 4.1) | 30.6% | 51% | 100 | 0 | 901MB | 2.5GB | 2.8GB |
+| mperm | 9.3 (8.5 + 0.8) | 83.7% | 37% | 78 | 22 | 1.3GB | 1.5GB | 3.9GB |
+| gcbench | 11.2 (4.0 + 7.2) | 4.6% | 91% | 0 (records 100) | 0 | 88MB | 264MB | 445MB |
+| earley | 27.3 (18.7 + 8.6) | 36.3% | 57% | 70 | 30 | 3.5GB | 6.2GB | 8.1GB |
+
+("Old in marking": the share of all marking spent on objects that had
+survived a collection before, which is what a minor collection skips.)
+
+A native profile (`sample`) of the session thread gives the same
+picture:
+
+| | dispatch loop (incl. inline allocation) | `collect` | `new_page` | `malloc`/`free`/drop of boxes |
+|---|---:|---:|---:|---:|
+| mperm | 73% | 11% | 4.5% | under 2% |
+| earley | 65% | 15% | 2.5% | about 5% |
+
+Instructions per cycle are 3.5 (earley) to 4.3 (mperm), so the mutator
+isn't stalling on memory to any great degree.
+
+**What this says:**
+
+1. **The collector is a smaller part of the time than 07 assumed.**
+   Since `GC_GROWTH` became 2 (09), marking and sweeping take 5-27% of
+   these programs. A minor collection saves only the old part of the
+   marking, plus some of the sweeping. Its upper bound is about:
+   - 1.1-1.2x on earley and paraffins;
+   - 1.03-1.06x on mperm, gcbench and nboyer.
+
+   G2's 1.5x target can't be reached. mperm's and earley's gap to
+   Gauche is mostly the cost of each instruction, which plan/10
+   addresses.
+2. **Memory is the real problem, and it is the size of objects.** Pairs
+   are 70-100% of the objects in every program but two (gcbench is
+   records, paraffins half vectors), and each takes an 80-byte slot for
+   16 bytes of content. Closures are most of the rest: 80 bytes, plus a
+   separately allocated array of free variables (3.1GB in earley).
+   - A 16-byte pair with its mark bit in a per-page bitmap would cut
+     nboyer's live data about 5 times, and earley's and mperm's about
+     3 times.
+   - A generational collector would only reduce the slack between live
+     data and peak slots: 1.1x (mperm, paraffins), 1.8x (earley),
+     2.8x (nboyer).
+3. **The young survive poorly in the large programs.** 30-84% of young
+   objects survive their first collection in nboyer, earley and mperm,
+   so promoting them after one survival would fill the old generation
+   with data that dies soon after.
+4. **Small heaps collect too often.** deriv collects 3,350 times, each
+   time re-marking the ~6,500 objects the system itself holds, because
+   `GC_THRESHOLD` is 20,000 objects. At 200,000, deriv takes 1.06x
+   fewer cycles, destruc 1.01x and gcbench 0.99x. That's small, but it
+   is a one-line change.
+
+**Revised order, for review:**
+
+1. **G4 becomes the first phase, and is broader: compact objects.** Pairs
+   go in their own pages of 16-byte slots, with a mark bitmap per page
+   and a `Value` tag of their own (tags 5-7 are free). There are 27
+   `Obj::Pair` match sites. Closures with their free variables inline
+   come next, if pairs alone show that compact objects pay.
+   - **Target:** peak RSS halved or better on earley, mperm and nboyer.
+   - **To measure:** cycles, which could gain from better cache use or
+     lose to the second kind of slot.
+2. **`GC_THRESHOLD` raised**, measured on `bench/` and the r7rs set.
+3. **G1-G3 (the barrier and minor collections) deferred.** They are
+   worth doing only if, after compact objects, collection time is still
+   a large share in programs that matter. G0's numbers suggest 1.05-1.2x.
+   The barrier rule in plan/10 (`S3_STORE`) stays: it costs nothing, and
+   it keeps the generational collector possible.
+
 ### G1. The barrier, doing nothing
 
 - `Field` replaces `Cell<Value>` in heap objects.

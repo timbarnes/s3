@@ -182,6 +182,8 @@ pub struct Heap {
     /// its collections: a top-level form waiting to be expanded again
     /// after a library file it imports has been loaded.
     pub pinned: Vec<Value>,
+    #[cfg(feature = "gcstats")]
+    pub gc_stats: crate::gcstats::GcStats,
 }
 
 impl Heap {
@@ -207,11 +209,15 @@ impl Heap {
             interaction: None,
             libraries: Libraries::default(),
             pinned: Vec::new(),
+            #[cfg(feature = "gcstats")]
+            gc_stats: Default::default(),
         }
     }
 
     fn alloc(&mut self, kind: Obj) -> Value {
         self.allocations += 1;
+        #[cfg(feature = "gcstats")]
+        self.gc_stats.alloc(&kind);
         Value::obj(GcRef(self.slots.alloc(kind)))
     }
 
@@ -238,7 +244,9 @@ impl Heap {
     /// the rest.
     pub fn collect(&mut self, roots: impl IntoIterator<Item = Value>) {
         self.epoch += 1;
-        let mut m = Marker { epoch: self.epoch, grey: std::mem::take(&mut self.worklist), count: 0 };
+        #[cfg(feature = "gcstats")]
+        let t0 = std::time::Instant::now();
+        let mut m = Marker { epoch: self.epoch, grey: std::mem::take(&mut self.worklist), count: 0, #[cfg(feature = "gcstats")] young: 0 };
         roots.into_iter().for_each(|v| m.value(v));
         self.symbols.values().for_each(|&r| m.obj(r));
         self.system.iter().chain(&self.interaction).for_each(|&r| m.obj(r));
@@ -248,10 +256,30 @@ impl Heap {
         self.worklist = m.grey;
         self.marked += m.count;
         self.collections += 1;
+        #[cfg(feature = "gcstats")]
+        let t1 = std::time::Instant::now();
 
-        self.slots.sweep(self.epoch, self.poison);
+        self.slots.sweep(self.epoch, self.poison, #[cfg(feature = "gcstats")] &mut self.gc_stats);
+        #[cfg(feature = "gcstats")]
+        {
+            let st = &mut self.gc_stats;
+            st.mark += t1 - t0;
+            st.sweep += t1.elapsed();
+            st.young += self.allocations as u64;
+            st.young_survived += m.young as u64;
+            st.old_marked += (m.count - m.young) as u64;
+            st.peak_live = st.peak_live.max(self.slots.count);
+            st.peak_slots = st.peak_slots.max(self.slots.pages.len() * PAGE_SLOTS);
+        }
         self.allocations = 0;
         self.live_after_gc = self.slots.count;
+    }
+
+    /// Print the collector's statistics (`gcstats.rs`), before the process
+    /// exits.
+    #[cfg(feature = "gcstats")]
+    pub fn report_gc_stats(&self) {
+        self.gc_stats.report(self.collections, self.marked, std::mem::size_of::<GcObject>());
     }
 
     /// Write out every file output port's buffer: before the process
@@ -387,6 +415,10 @@ struct Marker {
     epoch: u64,
     grey: Vec<GcRef>,
     count: usize,
+    /// Of `count`, the objects never marked before: allocated since the
+    /// last collection.
+    #[cfg(feature = "gcstats")]
+    young: usize,
 }
 
 impl Marker {
@@ -399,6 +431,10 @@ impl Marker {
     fn obj(&mut self, r: GcRef) {
         let mark = &r.get().mark;
         if mark.get() != self.epoch {
+            #[cfg(feature = "gcstats")]
+            {
+                self.young += (mark.get() == 0) as usize;
+            }
             mark.set(self.epoch);
             self.count += 1;
             self.grey.push(r);
@@ -614,7 +650,7 @@ impl Slots {
 
     /// Free every object not marked in `epoch`, or in poison mode turn it
     /// into the symbol `<<FREED>>` and keep it.
-    fn sweep(&mut self, epoch: u64, poison: bool) {
+    fn sweep(&mut self, epoch: u64, poison: bool, #[cfg(feature = "gcstats")] st: &mut crate::gcstats::GcStats) {
         for i in 0..self.pages.len() {
             let base = self.pages[i];
             for j in 0..PAGE_SLOTS {
@@ -629,6 +665,11 @@ impl Slots {
                         continue;
                     }
                     self.count -= 1;
+                    #[cfg(feature = "gcstats")]
+                    {
+                        st.freed += 1;
+                        st.freed_boxed += crate::gcstats::GcStats::boxed(&(*p).kind) as u64;
+                    }
                     if poison {
                         (*p).kind = Obj::Symbol("<<FREED>>".into());
                         (*p).mark.set(POISONED);

@@ -19,3 +19,7 @@ debug = true
 # the counts at exit (plan/05 §7): what superinstructions would pay.
 # cargo run --release --features stats -- bench/fib.scm
 stats = []
+# Collector statistics, printed at exit (plan/11, G0): allocations by kind
+# and bytes, mark and sweep times, survival of young objects.
+# cargo run --release --features gcstats -- bench/fib.scm
+gcstats = []

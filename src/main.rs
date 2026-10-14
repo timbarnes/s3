@@ -26,6 +26,8 @@ mod globals;
 // use (ports in P6, the GC mark in P3). Remove these allows as the callers
 // arrive.
 #[allow(dead_code)]
+#[cfg(feature = "gcstats")]
+mod gcstats;
 mod heap;
 #[allow(dead_code)]
 mod io;
@@ -508,6 +510,8 @@ impl Session {
         std::io::stdout().flush().ok();
         #[cfg(feature = "stats")]
         vm::stats::report();
+        #[cfg(feature = "gcstats")]
+        self.heap.report_gc_stats();
         std::process::exit(code)
     }
 

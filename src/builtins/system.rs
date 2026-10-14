@@ -60,6 +60,8 @@ pub static PRIMITIVES: &[Primitive] = &[
         let code = exit_status(a.first().copied())?;
         h.flush_ports();
         std::io::stdout().flush().ok();
+        #[cfg(feature = "gcstats")]
+        h.report_gc_stats();
         std::process::exit(code)
     }),
 ];
