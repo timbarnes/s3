@@ -6,8 +6,10 @@ on one machine, an Apple M2 Max running macOS 27.0.1, with the scripts in
 
 In short:
 
-- **Performance.** Of these ten systems, only chibi and s1 are slower than
-  s2. Over the benchmarks both finish, chibi takes 3.6 times as long as s2,
+- **Performance.** s3 (2026-10-13) is 1.08 times faster than Gauche over
+  ecraven's benchmarks, and 1.6 times faster than s2 at P12; Chicken,
+  Guile and the native-code compilers remain faster. At P12: of these ten
+  systems, only chibi and s1 were slower than s2. Over the benchmarks both finish, chibi takes 3.6 times as long as s2,
   and s1 5.8 times. Gauche, the closest design to s2's, takes 0.68 of s2's
   time. The native-code compilers (Chez, Gambit, Racket) take a fifteenth
   to a ninth.
@@ -170,18 +172,25 @@ features that would make it practical rather than educational:
 
 ## Performance
 
-> **s3, 2026-10-13** (after S1, record access and inlining for programs;
-> one round, `bench/r7rs/run.sh -n 1 -t 120 "s3 gauche guile chicken
-> chez"`). s3 runs each benchmark as an R7RS program
+> **s3, 2026-10-13, after the heap's two steps** (objects of 80 bytes
+> rather than 128, mimalloc's unaligned path, pages of slots; plan/09):
+> `bench/r7rs/run.sh -n 3 -t 120 "s3 gauche"`, medians of three rounds.
+> **s3 is now 1.08 times faster than Gauche** (Gauche's time over s3's,
+> geometric mean over 56), faster on 28 benchmarks and slower on 28. Its
+> own times are 1.11 times better than in the run earlier that day,
+> before the heap work (Gauche's moved 2%). s3 is still furthest behind
+> on `gcbench` (0.52, from 0.35), `mperm` and `cat` (0.54), `puzzle` and
+> `earley` (0.58), `wc` (0.61). The table is at the end of this section.
+>
+> **s3, 2026-10-13, earlier** (after S1, record access and inlining for
+> programs; one round, `bench/r7rs/run.sh -n 1 -t 120 "s3 gauche guile
+> chicken chez"`). s3 runs each benchmark as an R7RS program
 > (`bench/r7rs/s3-prelude.scm` puts an `import` first), so it is
-> inlined. Against the s2 column below, s3 is 1.43 times faster
+> inlined. Against the s2 column below, s3 was 1.43 times faster
 > (geometric mean over 56; Gauche, the control, within 3%). Time
 > relative to s3: Chez 0.097 (10x faster), Guile 0.27 (3.7x), Chicken
 > 0.43 (2.3x), Gauche 0.99. chibi wasn't rerun; from the table below it
-> would be about 5 times slower. Against Gauche, s3 is furthest behind
-> on allocation: `gcbench` 0.35, `divrec` and `earley` 0.40, `mperm`
-> 0.44 (Gauche's time over s3's), and ahead on `equal` 19x, `pi` 5.8x,
-> `parsing` 3.1x, `ack` and `read1` 2x. The tables below are s2's.
+> would be about 5 times slower. The other tables below are s2's.
 
 > **These tables were rerun on 2026-10-12**, after s2's values were
 > NaN-boxed (D2, commit ffbe13f). Against P12's run, s2 is 1.24 times
@@ -326,6 +335,70 @@ published ones: Chicken's `tak` takes 11.0s here and 10.8s there.
   (`paraffins`); 46 of 56 are within 3%.
 - Between the two runs, s2's medians agree within 0.95-1.04x, 0.999 on
   average. That is the same noise as in P10 and P12.
+
+**s3 against Gauche, 2026-10-13, after the heap work.** Medians of three
+rounds, in seconds, at a tenth of the suite's iteration counts. The last
+column is Gauche's time over s3's: above 1, s3 is faster.
+
+| benchmark | s3 | Gauche | Gauche / s3 |
+|---|---:|---:|---:|
+| browse | 1.615 | 1.288 | 0.80 |
+| deriv | 1.670 | 1.832 | 1.10 |
+| destruc | 2.125 | 1.510 | 0.71 |
+| diviter | 1.467 | 1.012 | 0.69 |
+| divrec | 1.638 | 1.387 | 0.85 |
+| puzzle | 3.392 | 1.952 | 0.58 |
+| triangl | 1.987 | 1.445 | 0.73 |
+| tak | 16.210 | 13.224 | 0.82 |
+| takl | 52.517 | 50.388 | 0.96 |
+| ntakl | 41.274 | 49.746 | 1.21 |
+| cpstak | 34.043 | 60.124 | 1.77 |
+| ctak | 15.429 | 11.891 | 0.77 |
+| fib | 6.126 | 5.514 | 0.90 |
+| fibc | 1.130 | 1.118 | 0.99 |
+| fibfp | 0.762 | 0.687 | 0.90 |
+| sum | 3.326 | 2.213 | 0.67 |
+| sumfp | 1.187 | 0.880 | 0.74 |
+| fft | 0.464 | 0.600 | 1.29 |
+| mbrot | 1.108 | 1.304 | 1.18 |
+| mbrotZ | ERROR | 2.004 |  |
+| nucleic | 0.656 | 1.078 | 1.64 |
+| pi | 0.038 | 0.233 | 6.13 |
+| pnpoly | 2.339 | 1.468 | 0.63 |
+| ray | 0.816 | 1.172 | 1.44 |
+| simplex | 1.691 | 2.221 | 1.31 |
+| ack | 12.357 | 26.593 | 2.15 |
+| array1 | 2.333 | 1.562 | 0.67 |
+| string | 0.051 | 0.079 | 1.54 |
+| sum1 | 0.082 | 0.066 | 0.81 |
+| cat | 1.646 | 0.888 | 0.54 |
+| tail | 0.230 | 0.337 | 1.47 |
+| wc | 2.050 | 1.249 | 0.61 |
+| read1 | 0.061 | 0.160 | 2.64 |
+| compiler | 1.448 | 1.498 | 1.03 |
+| conform | 2.358 | 2.756 | 1.17 |
+| dynamic | 1.128 | 1.171 | 1.04 |
+| earley | 12.604 | 7.273 | 0.58 |
+| graphs | 14.972 | 18.449 | 1.23 |
+| lattice | 4.905 | 3.812 | 0.78 |
+| matrix | 1.893 | 2.001 | 1.06 |
+| maze | 1.010 | 1.175 | 1.16 |
+| mazefun | 1.710 | 2.216 | 1.30 |
+| nqueens | 4.016 | 4.479 | 1.12 |
+| paraffins | 0.526 | 1.170 | 2.23 |
+| parsing | 2.376 | 7.146 | 3.01 |
+| peval | 2.620 | 2.510 | 0.96 |
+| primes | 0.676 | 0.782 | 1.16 |
+| quicksort | 2.559 | 2.431 | 0.95 |
+| scheme | 1.838 | 1.849 | 1.01 |
+| slatex | 1.229 | 1.295 | 1.05 |
+| chudnovsky | 0.106 | 0.073 | 0.69 |
+| nboyer | 10.637 | 8.198 | 0.77 |
+| sboyer | 11.463 | 9.398 | 0.82 |
+| gcbench | 24.131 | 12.572 | 0.52 |
+| mperm | 4.540 | 2.445 | 0.54 |
+| equal | 0.387 | 7.654 | 19.79 |
+| bv2string | 0.559 | 0.579 | 1.04 |
 
 ### What the numbers say about s2
 
