@@ -1,0 +1,47 @@
+template top-level
+   0  MakeClosure k0   ; #<template scale>
+   1  GlobalDefine k1  ; scale
+   2  Return
+template scale  arity 1
+   0  Fixnum 3
+   1  Fixnum 0
+   2  MakeBox 2        ; count
+   3  Undefined
+   4  Undefined
+   5  LocalRef 2       ; count
+   6  LocalRef 1       ; factor
+   7  MakeClosure k0   ; #<template one>
+   8  LocalSet 3       ; one
+   9  LocalRef 3       ; one
+  10  LocalRef 4       ; all
+  11  MakeClosure k1   ; #<template all>
+  12  LocalSet 4       ; all
+  13  PatchFree 4 1 4  ; all.1 = all
+  14  LocalRef 4       ; all
+  15  LocalRef 0       ; xs
+  16  TailCall 1
+template one  arity 1  free 2
+   0  FreeRef 0        ; count
+   1  FreeRef 0        ; count
+   2  BoxRef
+   3  AddImm 1
+   4  BoxSet
+   5  Unspecified
+   6  Pop
+   7  LocalRef 0       ; x
+   8  FreeRef 1        ; factor
+   9  Mul
+  10  Return
+template all  arity 1  free 2
+   0  LocalRef 0       ; xs
+   1  JumpIfNot NullP →4
+   2  Nil
+   3  Return
+   4  FreeRef 0        ; one
+   5  CarLocal 0       ; xs
+   6  Call 1
+   7  FreeRef 1        ; all
+   8  CdrLocal 0       ; xs
+   9  Call 1
+  10  Cons
+  11  Return

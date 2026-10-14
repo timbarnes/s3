@@ -2,7 +2,8 @@
 ;;;
 ;;; - the free variables of each lambda, the values its flat closure copies;
 ;;; - which variables need boxes;
-;;; - which letrecs are lambda groups.
+;;; - which letrecs are lambda groups, after splitting off the simple
+;;;   bindings of those that are lambdas and values (split-letrecs).
 ;;;
 ;;; Variables are numbers here, unique within a top-level form, so no
 ;;; scopes are needed. Sets are lists.
@@ -115,3 +116,43 @@
   (cond ((null? ids) '())
         ((eqv? (car ids) id) (remove-id id (cdr ids)))
         (else (cons (car ids) (remove-id id (cdr ids))))))
+
+;; `e` with each letrec whose inits are all lambdas or simple values, and
+;; some of them values, split in two: (let (simple ...) (letrec (lambda
+;; ...) body)), so that the lambdas are a lambda group, made without boxes
+;; (*Fixing Letrec*). A body of internal definitions with a constant among
+;; its procedures is such a letrec. A simple init is a constant or a
+;; variable from outside the letrec: neither it nor making a closure can
+;; run code, so evaluating the simple ones first changes nothing.
+(define (split-letrecs e)
+  (define (split e) (split-letrecs e))
+  (case (node-tag e)
+    ((const local-ref global-ref) e)
+    ((local-set) (vector 'local-set (local-set-id e) (split (local-set-value e))))
+    ((global-define global-set) (vector (node-tag e) (global-cell e) (split (global-value e))))
+    ((if) (vector 'if (split (if-test e)) (split (if-then e)) (split (if-else e))))
+    ((seq) (vector 'seq (map split (seq-body e))))
+    ((call) (vector 'call (split (call-fn e)) (map split (call-args e))))
+    ((lambda) (vector 'lambda (lambda-name e) (lambda-params e) (lambda-rest e) (split (lambda-body e))))
+    ((let) (vector 'let (map (lambda (b) (cons (binding-var b) (split (binding-init b)))) (let-bindings e)) (split (let-body e))))
+    ((letrec)
+     (let* ((bindings (map (lambda (b) (cons (binding-var b) (split (binding-init b)))) (let-bindings e)))
+            (body (split (let-body e)))
+            (ids (map (lambda (b) (var-id (binding-var b))) bindings)))
+       (define (simple? init)
+         (case (node-tag init)
+           ((const global-ref) #t)
+           ((local-ref) (not (memv (local-ref-id init) ids)))
+           (else #f)))
+       (define (lambda? init) (eq? (node-tag init) 'lambda))
+       (if (and (any? (lambda (b) (simple? (binding-init b))) bindings)
+                (every? (lambda (b) (or (lambda? (binding-init b)) (simple? (binding-init b)))) bindings))
+           (let loop ((bs bindings) (simple '()) (lambdas '()))
+             (cond ((pair? bs)
+                    (if (lambda? (binding-init (car bs)))
+                        (loop (cdr bs) simple (cons (car bs) lambdas))
+                        (loop (cdr bs) (cons (car bs) simple) lambdas)))
+                   ((null? lambdas) (vector 'let (reverse simple) body))
+                   (else (vector 'let (reverse simple) (vector 'letrec (reverse lambdas) body)))))
+           (vector 'letrec bindings body))))
+    (else e)))

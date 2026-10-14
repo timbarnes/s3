@@ -45,7 +45,8 @@
 
 ;; Compile a top-level form into a template of no arguments.
 (define (codegen e)
-  (let ((g (new-gen (boxed-variables e) (vector '()))))
+  (let* ((e (split-letrecs e))
+         (g (new-gen (boxed-variables e) (vector '()))))
     (gen-expr g e #t)
     (finish g "top-level" 0 #f)))
 
