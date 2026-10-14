@@ -199,6 +199,16 @@ measurements say that allocation as a whole was about 30% of run time, and
 Scheme objects were a small part of that. Fixnums alone remove most
 allocation in numeric code.
 
+**After G1-G3** (11), the collector is still non-moving mark-sweep with
+the same roots and safepoints, but objects no longer each get a `Box`.
+Pairs live in 16-byte slots, and closures and records inline in
+size-classed slots, in 64KB pages aligned to their size, with a mark
+bitmap in each page's header; `Value` tags them directly. Other objects
+stay in pages of `Obj` slots. A collection is due after 100,000
+allocations or twice the objects that survived the last, whichever is
+more, and empty compact pages beyond what the next cycle needs are
+returned to the system.
+
 ---
 
 ## 5. VM model (Decision D4)

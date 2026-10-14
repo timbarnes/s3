@@ -228,6 +228,7 @@ impl Heap {
     }
 
     /// The number of objects in the heap, live or not yet collected.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.slots.count + self.small.count()
     }
@@ -770,7 +771,7 @@ mod tests {
         assert_eq!(crate::printer::print_value(kept), "(s 1)");
         // Pairs: the slots of dead ones are reused, so making as many again
         // needs no new page.
-        let mut churn = |heap: &mut Heap| {
+        let churn = |heap: &mut Heap| {
             for i in 0..10_000 {
                 heap.cons(Value::fixnum(i).unwrap(), Value::NIL);
             }

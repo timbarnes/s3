@@ -74,6 +74,8 @@ nav:
     - 07 Comparison with other Schemes: design/07-comparison.md
     - 08 The compiler in Scheme: design/08-compiler-in-scheme.md
     - 09 s3: design/09-s3.md
+    - 10 Native code: design/10-native.md
+    - 11 Memory and the collector: design/11-collector.md
     - Phases:
       - P0: design/phases/P0.md
       - P1: design/phases/P1.md

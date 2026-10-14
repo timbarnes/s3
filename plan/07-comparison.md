@@ -47,7 +47,7 @@ from each system's documentation and published papers.
 
 | | Compiles to | Compiler written in | Garbage collector | Continuations | Macros |
 |---|---|---|---|---|---|
-| **s3** | bytecode for a stack VM (an `enum` per instruction), checked by a verifier | Scheme (`scheme/compiler/`), compiling itself | precise, non-moving mark-sweep, objects in pages of same-sized slots | copy the VM's stacks (D8) | `syntax-rules`, hygiene by renaming |
+| **s3** | bytecode for a stack VM (an `enum` per instruction), checked by a verifier | Scheme (`scheme/compiler/`), compiling itself | precise, non-moving mark-sweep; pairs, closures and records in compact size-classed pages, other objects in pages of same-sized slots | copy the VM's stacks (D8) | `syntax-rules`, hygiene by renaming |
 | s2 | the same | Rust | precise, non-moving mark-sweep | the same | the same |
 | s1 | nothing: it interprets the code as a CEK machine | — | precise mark-sweep | heap-allocated continuation frames: capture is O(1) | `syntax-rules`, and a non-hygienic `macro` |
 | chibi | bytecode for a stack VM | C, with libraries in Scheme | its own precise, non-moving collector † (Boehm is an option, off) | copies of the VM stack | syntactic closures; `syntax-rules` and explicit renaming built on them |

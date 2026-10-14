@@ -4,6 +4,9 @@ Written 2026-10-13 as a plan for a generational collector. Rewritten the
 same day after G0 measured where time and memory actually go. It comes
 before native code (10): order 1 of the review.
 
+**Status:** G0-G3 done 2026-10-13 and 2026-10-14, and merged into
+`main`. G4 is deferred.
+
 ## Why
 
 plan/07 found two gaps against Gauche that it put down to the collector:
@@ -429,7 +432,9 @@ Native code (10) writes every store as `S3_STORE`, so this stays
 possible after native code exists. Until G4, `S3_STORE` is a plain
 store.
 
-## Decisions to confirm
+## Decisions
+
+All five confirmed by G1-G3.
 
 | # | Decision | Recommendation |
 |---|---|---|

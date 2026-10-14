@@ -48,7 +48,8 @@ target/release/s3 -e '(+ 1 2)'         # evaluate an expression
   before it can run.
 - **Compiled files.** Programs can be compiled ahead (`--compile`), and
   library files are compiled and cached next to their source.
-- **A precise mark-sweep garbage collector.**
+- **A precise mark-sweep garbage collector**, with pairs, closures and
+  records in compact pages.
 
 ## Speed
 

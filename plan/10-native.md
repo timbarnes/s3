@@ -1,6 +1,7 @@
 # 10. Native code: bytecode to C, loaded with dlopen
 
 Written 2026-10-13, on the `native` branch, for review before any code.
+**Status:** not started. The memory work in 11 (G0-G3) is done.
 06 §5 recorded native code as a later direction and said that, with the
 compiler in Scheme, a C backend was the natural route. This document
 chooses a design and splits it into phases N0-N6. It follows the memory

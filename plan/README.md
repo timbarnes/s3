@@ -1,13 +1,13 @@
-# s2: a bytecode-compiled R7RS-small Scheme
+# s2 and s3: a bytecode-compiled R7RS-small Scheme
 
 Planning documents, written 2026-10-10, before any code exists. They follow
 the practice s1 already uses (`../s1/design/*.md`): work out the design on
 paper, measure where possible, then implement in small steps.
 
-For using s2, see the [user guide](https://timbarnes.github.io/s2/) (source
+For using s3, see the [user guide](https://timbarnes.github.io/s3/) (source
 in `docs/`).
 
-**Status:** P0-P7 done 2026-10-10, P8-P12 2026-10-11 ([P0](phases/P0.md), [P1](phases/P1.md), [P2](phases/P2.md), [P3](phases/P3.md), [P4](phases/P4.md), [P5](phases/P5.md), [P6](phases/P6.md), [P7](phases/P7.md), [P8](phases/P8.md), [P9](phases/P9.md), [P10](phases/P10.md), [P11](phases/P11.md), [P12](phases/P12.md)). P13, planned in [08](08-compiler-in-scheme.md), is done: [P13.0-P13.6](phases/P13.md) 2026-10-12 and 2026-10-13 (P13.2 folded into P13.1). **s2 is frozen at P13** (tag `s2-final`), with both compilers; work continues in s3, which keeps only the compiler in Scheme. **s3:** [S0](09-s3.md#s0-the-rust-compiler-goes) done 2026-10-13: the Rust compiler is gone, the boot images are committed, and a verifier checks every template. [S1](09-s3.md#s1-a-faster-compiler-done), a faster compiler, is done: steps 0-3, 1.5-2.35x; steps 4 and 5 measured and dropped.
+**Status:** P0-P7 done 2026-10-10, P8-P12 2026-10-11 ([P0](phases/P0.md), [P1](phases/P1.md), [P2](phases/P2.md), [P3](phases/P3.md), [P4](phases/P4.md), [P5](phases/P5.md), [P6](phases/P6.md), [P7](phases/P7.md), [P8](phases/P8.md), [P9](phases/P9.md), [P10](phases/P10.md), [P11](phases/P11.md), [P12](phases/P12.md)). P13, planned in [08](08-compiler-in-scheme.md), is done: [P13.0-P13.6](phases/P13.md) 2026-10-12 and 2026-10-13 (P13.2 folded into P13.1). **s2 is frozen at P13** (tag `s2-final`), with both compilers; work continues in s3, which keeps only the compiler in Scheme. **s3:** [S0](09-s3.md#s0-the-rust-compiler-goes) done 2026-10-13: the Rust compiler is gone, the boot images are committed, and a verifier checks every template. [S1](09-s3.md#s1-a-faster-compiler-done), a faster compiler, is done: steps 0-3, 1.5-2.35x; steps 4 and 5 measured and dropped. **Memory:** [G0-G3](11-collector.md) done 2026-10-13 and 2026-10-14, merged into `main`: pairs, closures and records in compact pages, 2.4-5.4x less peak memory on the large benchmarks, about 1.05x faster overall; G4, a generational collector, deferred. **Native code** ([10](10-native.md)) is next to consider; not started.
 
 ## Goals
 
@@ -31,7 +31,7 @@ in `docs/`).
   simple instruction trace are part of the plan anyway, as learning tools
   (see 03, §15).
 - Complex numbers. P9 keeps a slot open for them if this changes.
-- A native-code compiler or JIT.
+- A native-code compiler or JIT. Since proposed for s3 in 10.
 - Changes to s1. It stays frozen as the reference implementation and test
   oracle.
 
@@ -48,8 +48,8 @@ in `docs/`).
 | [07-comparison.md](07-comparison.md) | P12, updated for s3: s3 against s2, s1 and eight other Schemes, in architecture, completeness, features and performance |
 | [08-compiler-in-scheme.md](08-compiler-in-scheme.md) | The plan for P13: the decisions to settle, sub-phases P13.0-P13.6 and their exit tests, and the risks |
 | [09-s3.md](09-s3.md) | s3: S0 removes the Rust compiler, commits the boot images and adds a verifier; what follows |
-| [10-native.md](10-native.md) | Native code, for review: templates translated to C in Scheme, loaded with `dlopen`, calls through the dispatch loop; phases N0-N6. Follows 11 |
-| [11-collector.md](11-collector.md) | Memory, for review: G0's measurements, then compact pairs, closures and records, scheduling; a generational collector deferred; phases G0-G4. Comes before 10 |
+| [10-native.md](10-native.md) | Native code, for review: templates translated to C in Scheme, loaded with `dlopen`, calls through the dispatch loop; phases N0-N6. Not started |
+| [11-collector.md](11-collector.md) | Memory: G0's measurements, then compact pairs, closures and records, and scheduling, all done (G1-G3); a generational collector deferred (G4) |
 
 Read them in order the first time. During implementation, 04 is the working
 document, and 03 is the reference for why things are shaped as they are.
@@ -69,7 +69,7 @@ Already made by the user:
 | U7 | Where the compiler in Scheme is built | In this repository, tagged first; not a fork (06 §1) |
 | U8 | Phases after P11 | P12 comparison with other Schemes, P13 the compiler in Scheme |
 | U9 | Embedded targets (ESP32) | Not planned (06 §4) |
-| U10 | Native code | Not planned for now (06 §5). Proposed in 10, on the `native` branch |
+| U10 | Native code | Not planned for now (06 §5). Proposed in 10, after the memory work in 11 |
 | C1-C11 | The compiler in Scheme | Settled before P13 (08): environments stay in Rust, the Scheme compiler must produce the Rust compiler's code exactly, back end first |
 
 Recommended in these documents, each to be confirmed:
@@ -78,7 +78,7 @@ Recommended in these documents, each to be confirmed:
 |---|---|---|---|
 | D1 | Project strategy and reuse | **Accepted.** A new crate. Fork the reader, printer, number syntax, io, the syntax-rules matcher and builtin logic from s1, and adapt them. Write a new value representation, heap interface, compiler and VM | 02 |
 | D2 | Value representation | An opaque `Value` type with unboxed fixnums, chars and immediates. Start as a 16-byte `Copy` enum, keep it behind methods, and move to a tagged word later if measurement says so. **After P12:** NaN-boxed, one 64-bit word: flonums stay unboxed, fixnums are 48-bit. 1.11-1.41x faster on `bench/`, 1.24x (geometric mean) on the 56 r7rs benchmarks in 07's rerun, none slower; only `value.rs` changed | 03 §3 |
-| D3 | Garbage collector | s1's model: non-moving mark-sweep, epoch marks, collection only at safepoints, explicit roots | 03 §4 |
+| D3 | Garbage collector | s1's model: non-moving mark-sweep, epoch marks, collection only at safepoints, explicit roots. **After G1-G3:** still non-moving mark-sweep, but pairs, closures and records live in compact size-classed pages with mark bitmaps, and empty pages are given back | 03 §4, 11 |
 | D4 | VM model | Stack-based, with frames on a single contiguous value stack | 03 §5 |
 | D5 | Instruction encoding | A Rust `enum Op` ("wordcode") first, a byte encoding when bytecode files arrive. **P11:** files encode each instruction as a tag byte and LEB128 operands, decoded into `Op`s on load | 03 §6 |
 | D6 | Closures and variables | Flat closures, and assignment conversion: mutated captured variables live in boxes | 03 §7 |
