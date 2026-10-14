@@ -56,7 +56,7 @@ use crate::vm::stack::{self, Stack};
 /// them up again (P10).
 #[derive(Clone, Copy)]
 pub struct Frame {
-    pub closure: GcRef,
+    pub closure: Closure,
     t: &'static Template,
     free: &'static [std::cell::Cell<Value>],
     ip: usize,
@@ -84,12 +84,20 @@ pub struct Vm {
     pub captures: usize,
 }
 
+/// A closure, as the VM's registers and frames hold it: not a `Value`, so
+/// that `Option<Frame>` needs no tag of its own (a return pops one).
+pub type Closure = std::ptr::NonNull<crate::space::Headed>;
+
+/// The closure `v`, which must be one.
+fn closure_of(v: Value) -> Closure {
+    std::ptr::NonNull::from(v.as_closure().expect("not a closure"))
+}
+
 /// The template and free variables of a closure.
-fn parts(closure: GcRef) -> (&'static Template, &'static [std::cell::Cell<Value>]) {
-    match &closure.get().kind {
-        Obj::Closure { template, free } => (template_of(*template), free),
-        _ => unreachable!("not a closure"),
-    }
+fn parts(closure: Closure) -> (&'static Template, &'static [std::cell::Cell<Value>]) {
+    // SAFETY: a closure the VM holds is alive: the roots include it.
+    let c = unsafe { closure.as_ref() };
+    (template_of(c.link()), c.fields())
 }
 
 fn template_of(t: GcRef) -> &'static Template {
@@ -175,10 +183,8 @@ fn element<'a>(v: Value, k: Value) -> Option<&'a std::cell::Cell<Value>> {
 
 /// Field `index` of `obj`, if it is a record of type `rtype` that has one.
 fn field<'a>(obj: Value, rtype: Value, index: Value) -> Option<&'a std::cell::Cell<Value>> {
-    match obj.as_obj().map(|o| &o.kind) {
-        Some(Obj::Record { rtype: t, fields }) if Value::obj(*t).eq(rtype) => fields.get(usize::try_from(index.as_fixnum()?).ok()?),
-        _ => None,
-    }
+    let r = obj.as_record().filter(|r| Value::obj(r.link()).eq(rtype))?;
+    r.fields().get(usize::try_from(index.as_fixnum()?).ok()?)
 }
 
 fn box_contents<'a>(b: Value) -> &'a std::cell::Cell<Value> {
@@ -266,7 +272,7 @@ impl Vm {
         self.frames.clear();
         self.backtrace.clear();
         self.stack.push(closure);
-        let result = self.execute(heap, closure.as_ref().unwrap());
+        let result = self.execute(heap, closure_of(closure));
         if result.is_err() {
             self.stack.clear();
             self.frames.clear();
@@ -290,7 +296,7 @@ impl Vm {
     /// and its frame pointer, or `e`'s message if it can't be handled.
     #[cold]
     #[inline(never)]
-    fn raise(&mut self, heap: &mut Heap, e: Error, here: Frame) -> Result<(GcRef, usize), String> {
+    fn raise(&mut self, heap: &mut Heap, e: Error, here: Frame) -> Result<(Value, usize), String> {
         let Some(handler) = (e.kind != ErrorKind::Uncaught).then(|| system_procedure(heap, "%raise-error")).flatten() else {
             return Err(e.message);
         };
@@ -301,10 +307,10 @@ impl Vm {
         let base = self.stack.len();
         self.stack.push(handler);
         self.stack.push(obj);
-        Ok((handler.as_ref().unwrap(), base + 1))
+        Ok((handler, base + 1))
     }
 
-    fn execute(&mut self, heap: &mut Heap, mut closure: GcRef) -> Result<Value, String> {
+    fn execute(&mut self, heap: &mut Heap, mut closure: Closure) -> Result<Value, String> {
         let (mut t, mut free) = parts(closure);
         let mut ip = 0;
         let mut fp = 1;
@@ -408,7 +414,9 @@ impl Vm {
             ($run:lifetime, $e:expr) => {{
                 // Out of line, so the error path doesn't bloat every
                 // instruction in the dispatch loop.
-                (closure, fp) = self.raise(heap, $e.into(), Frame { closure, t, free, ip, fp })?;
+                let handler;
+                (handler, fp) = self.raise(heap, $e.into(), Frame { closure, t, free, ip, fp })?;
+                closure = closure_of(handler);
                 (t, free) = parts(closure);
                 ip = 0;
                 reload!();
@@ -469,10 +477,8 @@ impl Vm {
                 }
                 Op::FreeRef(i) => push!(free[i as usize].get()),
                 Op::PatchFree(closure_slot, i, value_slot) => {
-                    let Some(Obj::Closure { free, .. }) = at!(fp + closure_slot as usize).as_obj().map(|o| &o.kind) else {
-                        unreachable!("PatchFree of a non-closure")
-                    };
-                    free[i as usize].set(at!(fp + value_slot as usize));
+                    let c = at!(fp + closure_slot as usize).as_closure().expect("PatchFree of a non-closure");
+                    c.fields()[i as usize].set(at!(fp + value_slot as usize));
                 }
                 Op::MakeBox(i) => {
                     let slot = fp + i as usize;
@@ -570,8 +576,8 @@ impl Vm {
                     let n = argc as usize + 1;
                     let base = sp - n;
                     let f = at!(base);
-                    if let Some(Obj::Closure { template, free: captured }) = f.as_obj().map(|o| &o.kind)
-                        && let callee = template_of(*template)
+                    if let Some(c) = f.as_closure()
+                        && let callee = template_of(c.link())
                         && !callee.rest
                         && callee.required == argc
                         && !heap.needs_gc()
@@ -589,8 +595,8 @@ impl Vm {
                             self.frames.push(Frame { closure, t, free, ip, fp });
                             fp = base + 1;
                         }
-                        closure = f.as_ref().unwrap();
-                        (t, free) = (callee, captured);
+                        closure = c.into();
+                        (t, free) = (callee, c.fields());
                         ip = 0;
                         continue 'run;
                     }
@@ -606,9 +612,9 @@ impl Vm {
                     // the call into another one.
                     loop {
                         let f = self.stack[base];
-                        match f.as_obj().map(|o| &o.kind) {
-                            Some(Obj::Closure { template, free: captured }) => {
-                                let callee = template_of(*template);
+                        match (f.as_closure(), f.as_obj().map(|o| &o.kind)) {
+                            (Some(c), _) => {
+                                let callee = template_of(c.link());
                                 let base = if tail {
                                     // Slide the callee and its arguments down to
                                     // where the current procedure's callee slot is.
@@ -624,11 +630,11 @@ impl Vm {
                                     self.frames.push(Frame { closure, t, free, ip, fp });
                                     fp = base + 1;
                                 }
-                                closure = f.as_ref().unwrap();
-                                (t, free) = (callee, captured);
+                                closure = c.into();
+                                (t, free) = (callee, c.fields());
                                 ip = 0;
                             }
-                            Some(Obj::Primitive(p)) => match p.f {
+                            (_, Some(Obj::Primitive(p))) => match p.f {
                                 PrimFn::Apply => {
                                     if let Err(e) = self.spread_apply(base) {
                                         fail!('run, e);
@@ -664,7 +670,7 @@ impl Vm {
                                     Err(e) => fail!('run, e),
                                 },
                             },
-                            Some(Obj::Continuation { stack, frames }) => {
+                            (_, Some(Obj::Continuation { stack, frames })) => {
                                 let v = self.arguments_as_value(heap, base);
                                 self.stack.clear();
                                 self.stack.extend_from_slice(stack);
@@ -674,7 +680,7 @@ impl Vm {
                                 resume!(v);
                                 continue 'run;
                             }
-                            Some(Obj::Escape { stack_len, frames_len, frame }) => {
+                            (_, Some(Obj::Escape { stack_len, frames_len, frame })) => {
                                 let (stack_len, frames_len, frame) = (*stack_len, *frames_len, *frame);
                                 let live = match frame {
                                     Some(fr) => self.frames.get(frames_len) == Some(&fr) && self.stack.len() >= stack_len,
@@ -845,10 +851,10 @@ impl Vm {
     /// current ports (the heap adds the symbol table, the environments and
     /// the libraries).
     #[inline]
-    fn safepoint(&self, heap: &mut Heap, closure: GcRef) {
+    fn safepoint(&self, heap: &mut Heap, closure: Closure) {
         if heap.needs_gc() {
-            let frames = self.frames.iter().map(|f| Value::obj(f.closure));
-            let roots = self.stack.iter().chain(&self.ports).copied().chain(frames).chain([Value::obj(closure)]);
+            let frames = self.frames.iter().map(|f| Value::closure(f.closure));
+            let roots = self.stack.iter().chain(&self.ports).copied().chain(frames).chain([Value::closure(closure)]);
             heap.collect(roots);
         }
     }
@@ -929,7 +935,7 @@ fn system_procedure(heap: &mut Heap, name: &str) -> Option<Value> {
     match env_of(heap.system?).borrow().lookup(name)? {
         TopBinding::Variable(cell) => {
             let v = cell_value(cell).get();
-            matches!(v.as_obj().map(|o| &o.kind), Some(Obj::Closure { .. })).then_some(v)
+            v.as_closure().is_some().then_some(v)
         }
         _ => None,
     }

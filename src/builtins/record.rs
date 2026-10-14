@@ -16,7 +16,7 @@ pub static PRIMITIVES: &[Primitive] = &[
     prim("%record-indexes", 2, Some(2), record_indexes),
     prim("%record-new", 2, None, record_new),
     prim("%record?", 2, Some(2), |_, a| {
-        Ok(Value::bool(matches!(kind(a[0]), Some(Obj::Record { rtype, .. }) if Value::obj(*rtype).eq(a[1]))))
+        Ok(Value::bool(a[0].as_record().is_some_and(|r| Value::obj(r.link()).eq(a[1]))))
     }),
     prim("%record-index", 2, Some(2), |_, a| Ok(super::fixnum(field_index(a[0], a[1], "define-record-type")?))),
     prim("%record-ref", 3, Some(3), record_ref),
@@ -92,8 +92,8 @@ pub fn record_set_index(_: &mut Heap, a: &[Value]) -> Result<Value, Error> {
 
 /// The fields of `obj`, which must be a record of type `rtype`.
 fn record_fields<'a>(obj: Value, rtype: Value, who: &str) -> Result<&'a [std::cell::Cell<Value>], Error> {
-    match kind(obj) {
-        Some(Obj::Record { rtype: t, fields }) if Value::obj(*t).eq(rtype) => Ok(fields),
+    match obj.as_record() {
+        Some(r) if Value::obj(r.link()).eq(rtype) => Ok(r.fields()),
         _ => Err(err!("{}: expected a {} record, got {}", who, print_value(record_type(rtype, who)?.0), print_value(obj))),
     }
 }
@@ -111,6 +111,9 @@ fn make_record_type(heap: &mut Heap, args: &[Value]) -> Result<Value, Error> {
             return Err(err!("define-record-type: duplicate field {}", print_value(name)));
         }
         fields.push(name);
+    }
+    if fields.len() > crate::space::MAX_FIELDS {
+        return Err(err!("define-record-type: more than {} fields", crate::space::MAX_FIELDS));
     }
     Ok(heap.record_type(args[0], fields))
 }

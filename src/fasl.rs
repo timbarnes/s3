@@ -229,7 +229,7 @@ impl Writer<'_> {
     }
 
     fn val(&mut self, v: Value) -> Result<Val, String> {
-        Ok(if v.is_pair() || v.as_ref().is_some() {
+        Ok(if v.compact_addr().is_some() || v.as_ref().is_some() {
             Val::Obj(self.node(v)?)
         } else if let Some(n) = v.as_fixnum() {
             Val::Fixnum(n)
@@ -272,7 +272,9 @@ impl Writer<'_> {
             put_val(&mut b, d);
             return Ok(self.add(v, b));
         }
-        let r = v.as_ref().unwrap();
+        let Some(r) = v.as_ref() else {
+            return Err(format!("can't compile a constant {}", print_value(v)));
+        };
         match &r.get().kind {
             Obj::Symbol(name) => {
                 b.push(SYMBOL);

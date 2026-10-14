@@ -200,6 +200,25 @@ fn print_into(out: &mut String, v: Value, ctx: &mut Ctx) {
         out.push(')');
         return;
     }
+    if let Some(c) = v.as_closure() {
+        return match &c.link().get().kind {
+            Obj::Template(t) if t.name.is_empty() => out.push_str("#<procedure>"),
+            Obj::Template(t) => out.push_str(&format!("#<procedure {}>", t.name)),
+            _ => unreachable!(),
+        };
+    }
+    if let Some(r) = v.as_record() {
+        out.push_str("#<");
+        if let Obj::RecordType { name, .. } = &r.link().get().kind {
+            print_into(out, *name, ctx);
+        }
+        for f in r.fields() {
+            out.push(' ');
+            print_into(out, f.get(), ctx);
+        }
+        out.push('>');
+        return;
+    }
     let Some(obj) = v.as_ref() else {
         return print_immediate(out, v, write);
     };
@@ -239,11 +258,6 @@ fn print_into(out: &mut String, v: Value, ctx: &mut Ctx) {
             out.push('>');
         }
         Obj::Primitive(p) => out.push_str(&format!("#<procedure {}>", p.name)),
-        Obj::Closure { template, .. } => match &template.get().kind {
-            Obj::Template(t) if t.name.is_empty() => out.push_str("#<procedure>"),
-            Obj::Template(t) => out.push_str(&format!("#<procedure {}>", t.name)),
-            _ => unreachable!(),
-        },
         Obj::Box(_) => out.push_str("#<box>"),
         Obj::Environment(_) => out.push_str("#<environment>"),
         Obj::Continuation { .. } | Obj::Escape { .. } => out.push_str("#<continuation>"),
@@ -275,17 +289,6 @@ fn print_into(out: &mut String, v: Value, ctx: &mut Ctx) {
         Obj::RecordType { name, .. } => {
             out.push_str("#<record-type ");
             print_into(out, *name, ctx);
-            out.push('>');
-        }
-        Obj::Record { rtype, fields } => {
-            out.push_str("#<");
-            if let Obj::RecordType { name, .. } = &rtype.get().kind {
-                print_into(out, *name, ctx);
-            }
-            for f in fields.iter() {
-                out.push(' ');
-                print_into(out, f.get(), ctx);
-            }
             out.push('>');
         }
         Obj::Alias { .. } => print_into(out, Value::obj(crate::compile::syntax_rules::strip(obj)), ctx),

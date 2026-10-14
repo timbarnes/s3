@@ -241,6 +241,81 @@ don't move.
 - **Decided after G1:** whether to go on, and whether vectors should
   join.
 
+### G2 results (2026-10-13)
+
+Done, extended past the plan: there is no fallback. `src/pairs.rs`
+became `src/space.rs`:
+
+- **Size classes** are multiples of 16 bytes, up to 256. A larger object
+  gets a 64KB-aligned page of its own, freed when its object dies.
+  `Obj::Closure` and `Obj::Record` are gone, so there is one
+  representation each.
+- **`Headed`** is a header word (the template or record type in 48 bits,
+  the field count in 16), then the fields inline. A closure with two free
+  variables is 32 bytes, where it was 80 plus a separate 16-byte box.
+- **Value tags** 6 (closure) and 7 (record) use up the NaN-boxing tags.
+  A new kind of value would have to be an `Obj`.
+- **Mark bits are per 16-byte unit,** so every size class shares the
+  header layout, and marking needs no division.
+- **The VM keeps its running closure, and each frame's, as a
+  `NonNull<Headed>`, not a `Value`.** `Option<Frame>` then needs no tag
+  of its own, and a return pops one. As a `Value`, fib and tail were
+  9-18% slower than G1 in cycles; as a pointer, 4-5%.
+- **`GcRef::from_addr` no longer checks for null** (a `debug_assert`
+  does). Rebuilding a template's `GcRef` from a closure header at every
+  call had added 5% to fib's instructions.
+- Records are limited to 65,535 fields, an error at
+  `define-record-type`. Closures already were, by `nfree`.
+
+**Fixes to G1 found here:** G1's commit fails 27 debug tests and the heap
+test under poison. A `debug_assert` added after G1's debug run assumed
+`<<FREED>>` was interned at `Heap::new`, but tests turn poison on
+afterwards; it is now interned at the start of a poisoning collection,
+before marking. The heap test's reuse checks are skipped under poison.
+
+Tests: all 109 pass in release, in debug, and with stress and poison
+together. chibi's suite gives 1154.
+
+**Peak RSS:**
+
+| | before G1 | G1 | G2 |
+|---|---:|---:|---:|
+| earley | 8128MB | 4000MB | 2557MB |
+| mperm | 3940MB | 1485MB | 958MB |
+| gcbench | 445MB | 445MB | 184MB |
+| nboyer | 2822MB | 523MB | 523MB |
+| paraffins | 1181MB | 839MB | 841MB |
+
+Against G0, earley takes 3.2 times less memory, mperm 4.1, nboyer 5.4
+and gcbench 2.4.
+
+**Cycles, against G1** (median of 3, higher is faster):
+
+| | | | | | |
+|---|---:|---|---:|---|---:|
+| bench/guard | 1.12 | cpstak | 1.10 | bench/gen | 1.09 |
+| earley | 1.05 | deriv | 1.03 | paraffins | 1.02 |
+| gcbench | 1.02 | bench/macro-loop | 1.02 | mperm | 1.00 |
+| browse | 0.99 | pnpoly | 0.99 | nboyer | 0.98 |
+| bench/fib | 0.98 | bench/program | 0.98 | sum | 0.98 |
+| destruc | 0.98 | puzzle | 0.98 | bench/listmap | 0.97 |
+| array1 | 0.97 | sboyer | 0.96 | primes | 0.96 |
+| bench/deeprec | 0.96 | bench/tail | 0.96 | divrec | 0.95 |
+| fib | 0.95 | nqueens | 0.95 | bench/tak | 0.95 |
+| tak | 0.94 | | | | |
+
+The geometric mean is 0.99x against G1, which makes G1 and G2 together
+about 1.03x against G0. Programs that make many closures (`cpstak`,
+`guard`, `gen`, `earley`) gain. Call-bound programs lose 4-6.5%. That
+is past the 3% limit, from the dispatch loop's call path, where only a
+few instructions changed (fib +0.9% instructions against G1). Tried
+without success: restoring the slow call path's shape, and
+`#[inline(always)]` on the accessors.
+
+**Open:** whether the memory (35-60% less on top of G1) is worth 1%
+overall and 5-6% on call-bound code. The calls are what plan/10's
+native code replaces.
+
 ### G3. Scheduling and returning memory
 
 - **`GC_THRESHOLD`** raised from 20,000 to a value measured on `bench/`

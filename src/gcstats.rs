@@ -29,7 +29,7 @@ pub struct GcStats {
     /// Objects freed, and how many of them had something boxed to free.
     pub freed: u64,
     pub freed_boxed: u64,
-    /// Bytes in the slots of live objects and pairs, and in the pages.
+    /// Bytes in the slots of live `Obj`s, and in all the pages.
     pub peak_live: usize,
     pub peak_slots: usize,
 }
@@ -69,14 +69,12 @@ fn describe(kind: &Obj) -> (usize, &'static str, u64) {
         Obj::Box(_) => (11, "box", 0),
         Obj::Port(_) => (12, "port", size_of::<crate::io::PortKind>()),
         Obj::RecordType { fields, .. } => (13, "record type", fields.len() * 8),
-        Obj::Record { fields, .. } => (14, "record", fields.len() * 8),
         Obj::Continuation { stack, frames } => (15, "continuation", stack.len() * 8 + frames.len() * size_of::<crate::vm::Frame>()),
         Obj::Escape { .. } => (16, "escape", 0),
         Obj::Values(v) => (17, "values", v.len() * 8),
         Obj::Error { .. } => (18, "error", 0),
         Obj::Primitive(_) => (19, "primitive", 0),
         Obj::Template(t) => (20, "template", size_of::<crate::vm::Template>() + t.code.len() * 8 + t.consts.len() * 8),
-        Obj::Closure { free, .. } => (21, "closure", free.len() * 8),
     };
     (i, name, bytes as u64)
 }
@@ -85,6 +83,12 @@ impl GcStats {
     pub fn alloc_pair(&mut self) {
         let k = &mut self.kinds[0];
         *k = ("pair", k.1 + 1, 0);
+    }
+
+    /// A closure (kind 1 here) or record (2) of `fields`, all in its slot.
+    pub fn alloc_compact(&mut self, i: usize, name: &'static str, fields: usize) {
+        let k = &mut self.kinds[KINDS - i];
+        *k = (name, k.1 + 1, k.2 + (8 + 8 * fields as u64).div_ceil(16) * 16);
     }
 
     pub fn alloc(&mut self, kind: &Obj) {
@@ -115,12 +119,16 @@ impl GcStats {
         );
         eprintln!("gc: freed {}, {} with a box ({:.1}%)", self.freed, self.freed_boxed, pct(self.freed_boxed as f64, self.freed as f64));
         let mb = |n: f64| n / (1 << 20) as f64;
-        eprintln!("gc: peak live {:.1}MB of slots; peak pages {:.1}MB", mb(self.peak_live as f64), mb(self.peak_slots as f64));
+        eprintln!("gc: peak live {:.1}MB in Obj slots; peak pages {:.1}MB", mb(self.peak_live as f64), mb(self.peak_slots as f64));
         let mut rows: Vec<_> = self.kinds.iter().filter(|k| k.1 > 0).collect();
         rows.sort_by(|a, b| b.1.cmp(&a.1));
-        eprintln!("gc: allocations by kind (objects, % of objects, MB in slots, MB outside):");
+        eprintln!("gc: allocations by kind (objects, % of objects, MB in Obj slots, MB elsewhere: boxes, or compact slots for closures and records):");
         for (name, n, bytes) in rows {
-            let size = if *name == "pair" { 16 } else { slot };
+            let size = match *name {
+                "pair" => 16,
+                "closure" | "record" => 0,
+                _ => slot,
+            };
             eprintln!("{:>14} {:5.1}% {:9.1} {:9.1}  {}", n, pct(*n as f64, objects as f64), mb((*n as usize * size) as f64), mb(*bytes as f64), name);
         }
     }

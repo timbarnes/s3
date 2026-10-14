@@ -13,7 +13,9 @@
 //! | 2 | a `GcRef`: the heap object's address (user-space addresses fit in 48 bits) |
 //! | 3 | a character |
 //! | 4 | a constant: `()`, `#f`, `#t`, unspecified, eof, undefined |
-//! | 5 | a pair: its slot's address (`pairs.rs`) |
+//! | 5 | a pair: its slot's address (`space.rs`) |
+//! | 6 | a closure: its slot's address (`space.rs`) |
+//! | 7 | a record: its slot's address (`space.rs`) |
 //!
 //! Tag 0 would be the NaN `0xFFF8_0000_0000_0000`, which `flonum` never
 //! stores, so a word is a flonum exactly when it is below `0xFFF9 << 48`.
@@ -25,7 +27,7 @@
 use std::ptr::NonNull;
 
 use crate::heap::{GcObject, GcRef};
-use crate::pairs::Pair;
+use crate::space::{Headed, Pair};
 
 /// The smallest fixnum. Fixnums are 48-bit signed integers, what fits in
 /// a NaN-boxed payload; integers outside the range are bignums.
@@ -48,6 +50,8 @@ const OBJ: u64 = 2;
 const CHAR: u64 = 3;
 const CONST: u64 = 4;
 const PAIR: u64 = 5;
+const CLOSURE: u64 = 6;
+const RECORD: u64 = 7;
 /// The one NaN a flonum holds: positive, quiet, no payload.
 const CANONICAL_NAN: u64 = 0x7FF8_0000_0000_0000;
 
@@ -109,6 +113,33 @@ impl Value {
 
     pub fn is_pair(self) -> bool {
         self.tag() == PAIR
+    }
+
+    pub fn closure(p: NonNull<Headed>) -> Value {
+        Value(boxed(CLOSURE, p.as_ptr() as u64))
+    }
+
+    pub fn record(p: NonNull<Headed>) -> Value {
+        Value(boxed(RECORD, p.as_ptr() as u64))
+    }
+
+    /// The closure, if this value is one: its template and free variables.
+    #[inline]
+    pub fn as_closure<'a>(self) -> Option<&'a Headed> {
+        // SAFETY: only `closure` makes a CLOSURE payload, from a live one.
+        (self.tag() == CLOSURE).then(|| unsafe { &*((self.0 & PAYLOAD) as *const Headed) })
+    }
+
+    /// The record, if this value is one: its type and fields.
+    #[inline]
+    pub fn as_record<'a>(self) -> Option<&'a Headed> {
+        // SAFETY: only `record` makes a RECORD payload, from a live one.
+        (self.tag() == RECORD).then(|| unsafe { &*((self.0 & PAYLOAD) as *const Headed) })
+    }
+
+    /// The address of a pair, closure or record, for marking.
+    pub(crate) fn compact_addr(self) -> Option<*const u8> {
+        matches!(self.tag(), PAIR | CLOSURE | RECORD).then_some((self.0 & PAYLOAD) as *const u8)
     }
 
     /// The value's bits, and the value with these bits: for `pairs.rs`'
@@ -191,8 +222,8 @@ impl std::fmt::Debug for Value {
             write!(f, "Char({:?})", c)
         } else if let Some(r) = self.as_ref() {
             write!(f, "Obj({:?})", r)
-        } else if self.is_pair() {
-            write!(f, "Pair({:#x})", self.0 & PAYLOAD)
+        } else if self.compact_addr().is_some() {
+            write!(f, "Compact({}, {:#x})", self.tag(), self.0 & PAYLOAD)
         } else {
             let names = ["Nil", "False", "True", "Unspecified", "Eof", "Undefined"];
             f.write_str(names[(self.0 & PAYLOAD) as usize])

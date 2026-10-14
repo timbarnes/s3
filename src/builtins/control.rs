@@ -18,7 +18,7 @@ pub static PRIMITIVES: &[Primitive] = &[
     prim("dis", 1, Some(1), |_, _| Err(err!("dis: the compiler isn't loaded"))),
     prim("%load-library", 1, Some(1), |_, _| Err(err!("%load-library: the compiler isn't loaded"))),
     prim("procedure?", 1, Some(1), |_, a| {
-        Ok(Value::bool(matches!(kind(a[0]), Some(Obj::Closure { .. } | Obj::Primitive(_) | Obj::Continuation { .. } | Obj::Escape { .. }))))
+        Ok(Value::bool(a[0].as_closure().is_some() || matches!(kind(a[0]), Some(Obj::Primitive(_) | Obj::Continuation { .. } | Obj::Escape { .. }))))
     }),
     prim("values", 0, None, |h, a| Ok(h.values(a.to_vec()))),
     // What call-with-values applies its consumer to.

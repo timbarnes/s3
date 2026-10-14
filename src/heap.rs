@@ -1,8 +1,9 @@
 //! The heap: object layout, allocation and the symbol table (plan/03 §3-4).
 //!
 //! Every object is one slot of `Slots`: pages of same-sized slots, with a
-//! free list (heap step 2, plan/09), except pairs, which have pages of
-//! 16-byte slots of their own (`pairs.rs`, plan/11 G1). Objects never
+//! free list (heap step 2, plan/09), except pairs, closures and records,
+//! which have compact slots of their own (`space.rs`, plan/11 G1-G2).
+//! Objects never
 //! move, so a `GcRef` stays valid for as long as the object is alive.
 //! Mutable fields are `Cell`s (or a `RefCell` for strings), so all access is
 //! through shared references, unlike s1's `get_value_mut(&self)`.
@@ -37,7 +38,7 @@ use crate::compile::syntax_rules::SyntaxRules;
 use crate::globals::{Env, env_of};
 use crate::io::PortKind;
 use crate::libraries::Libraries;
-use crate::pairs::{self, Pairs};
+use crate::space::{self, Small};
 use crate::sstring::SString;
 use crate::value::Value;
 use crate::vm::{Frame, Template};
@@ -62,8 +63,11 @@ impl GcRef {
     }
 
     /// The `GcRef` at `addr`, which must have come from `addr`.
+    #[inline]
     pub(crate) fn from_addr(addr: u64) -> GcRef {
-        GcRef(NonNull::new(addr as *mut GcObject).expect("a GcRef is never null"))
+        debug_assert!(addr != 0, "a GcRef is never null");
+        // SAFETY: `addr` came from a GcRef, which is never null.
+        GcRef(unsafe { NonNull::new_unchecked(addr as *mut GcObject) })
     }
 }
 
@@ -82,7 +86,7 @@ pub struct GcObject {
 const _: () = assert!(std::mem::size_of::<GcObject>() == 80);
 
 /// The kinds of heap object.
-/// Pairs are not among them (`pairs.rs`).
+/// Pairs, closures and records are not among them (`space.rs`).
 pub enum Obj {
     /// An interned symbol. Its name never changes.
     Symbol(Box<str>),
@@ -118,8 +122,6 @@ pub enum Obj {
     /// A record type made by `define-record-type`: its name, and its field
     /// names in order.
     RecordType { name: Value, fields: Box<[Value]> },
-    /// An instance of a record type.
-    Record { rtype: GcRef, fields: Box<[Cell<Value>]> },
     /// A continuation captured by `%call/cc` (D8): copies of the value and
     /// frame stacks. Invoking it copies them back and returns its argument
     /// to the topmost frame.
@@ -139,11 +141,6 @@ pub enum Obj {
     /// Compiled code (`vm/op.rs`). Templates are heap objects so that a
     /// template's constant pool can hold the templates of its inner lambdas.
     Template(Box<Template>),
-    /// A procedure written in Scheme: a template plus the values of its free
-    /// variables, copied when the closure was made (a flat closure, D6).
-    /// The slots are cells only so that a `letrec` of lambdas can fill in
-    /// the members made after this one (`Op::PatchFree`).
-    Closure { template: GcRef, free: Box<[Cell<Value>]> },
 }
 
 /// The minimum number of allocations between collections (s1's default).
@@ -158,7 +155,7 @@ const GC_GROWTH: usize = 2;
 /// Owns every heap object.
 pub struct Heap {
     slots: Slots,
-    pairs: Pairs,
+    small: Small,
     symbols: FxHashMap<Box<str>, GcRef>,
     /// Allocations since the last collection.
     allocations: usize,
@@ -193,13 +190,13 @@ impl Heap {
     /// The number of objects on the heap, live or not yet collected.
     #[cfg(test)]
     pub fn object_count(&self) -> usize {
-        self.slots.count + self.pairs.count
+        self.slots.count + self.small.count()
     }
 
     pub fn new() -> Heap {
-        let mut heap = Heap {
+        Heap {
             slots: Slots::default(),
-            pairs: Pairs::default(),
+            small: Small::default(),
             symbols: FxHashMap::default(),
             allocations: 0,
             live_after_gc: 0,
@@ -215,13 +212,7 @@ impl Heap {
             pinned: Vec::new(),
             #[cfg(feature = "gcstats")]
             gc_stats: Default::default(),
-        };
-        if heap.poison {
-            // What freed pairs hold (`collect`); interned now, since a
-            // symbol made during a collection would be swept by it.
-            heap.intern("<<FREED>>");
         }
-        heap
     }
 
     fn alloc(&mut self, kind: Obj) -> Value {
@@ -233,7 +224,7 @@ impl Heap {
 
     /// The number of objects in the heap, live or not yet collected.
     pub fn len(&self) -> usize {
-        self.slots.count + self.pairs.count
+        self.slots.count + self.small.count()
     }
 
     /// Whether the next safepoint should collect: in stress mode always;
@@ -253,10 +244,15 @@ impl Heap {
     /// the system and interaction environments and the libraries, then free
     /// the rest.
     pub fn collect(&mut self, roots: impl IntoIterator<Item = Value>) {
+        if self.poison {
+            // What freed compact objects hold. Interned before marking, so
+            // the symbol table keeps it.
+            self.intern("<<FREED>>");
+        }
         self.epoch += 1;
         #[cfg(feature = "gcstats")]
         let t0 = std::time::Instant::now();
-        self.pairs.clear_marks();
+        self.small.clear_marks();
         let mut m = Marker { epoch: self.epoch, grey: std::mem::take(&mut self.worklist), count: 0, #[cfg(feature = "gcstats")] young: 0 };
         roots.into_iter().for_each(|v| m.value(v));
         self.symbols.values().for_each(|&r| m.obj(r));
@@ -272,8 +268,7 @@ impl Heap {
 
         self.slots.sweep(self.epoch, self.poison, #[cfg(feature = "gcstats")] &mut self.gc_stats);
         let freed = self.symbols.get("<<FREED>>").map_or(Value::UNDEFINED, |&r| Value::obj(r));
-        debug_assert!(!self.poison || !freed.is_undefined());
-        self.pairs.sweep(self.poison, freed);
+        self.small.sweep(self.poison, freed);
         #[cfg(feature = "gcstats")]
         {
             let st = &mut self.gc_stats;
@@ -283,11 +278,11 @@ impl Heap {
             st.young_survived += m.young as u64;
             st.old_marked += (m.count - m.young) as u64;
             let slot = std::mem::size_of::<GcObject>();
-            st.peak_live = st.peak_live.max(self.slots.count * slot + self.pairs.count * std::mem::size_of::<pairs::Pair>());
-            st.peak_slots = st.peak_slots.max(self.slots.pages.len() * PAGE_SLOTS * slot + self.pairs.bytes());
+            st.peak_live = st.peak_live.max(self.slots.count * slot);
+            st.peak_slots = st.peak_slots.max(self.slots.pages.len() * PAGE_SLOTS * slot + self.small.bytes());
         }
         self.allocations = 0;
-        self.live_after_gc = self.slots.count + self.pairs.count;
+        self.live_after_gc = self.slots.count + self.small.count();
     }
 
     /// Print the collector's statistics (`gcstats.rs`), before the process
@@ -314,7 +309,7 @@ impl Heap {
         self.allocations += 1;
         #[cfg(feature = "gcstats")]
         self.gc_stats.alloc_pair();
-        Value::pair(self.pairs.alloc(car, cdr))
+        Value::pair(self.small.cons(car, cdr))
     }
 
     /// The symbol named `name`, the same object every time.
@@ -392,7 +387,10 @@ impl Heap {
     }
 
     pub fn record(&mut self, rtype: GcRef, fields: Vec<Value>) -> Value {
-        self.alloc(Obj::Record { rtype, fields: fields.into_iter().map(Cell::new).collect() })
+        self.allocations += 1;
+        #[cfg(feature = "gcstats")]
+        self.gc_stats.alloc_compact(2, "record", fields.len());
+        Value::record(self.small.headed(rtype, fields.into_iter()))
     }
 
     pub fn continuation(&mut self, stack: Vec<Value>, frames: Vec<Frame>) -> Value {
@@ -416,9 +414,11 @@ impl Heap {
         self.alloc(Obj::Box(Cell::new(v)))
     }
 
-    pub fn closure(&mut self, template: GcRef, free: impl Iterator<Item = Value>) -> Value {
-        let free = free.map(Cell::new).collect();
-        self.alloc(Obj::Closure { template, free })
+    pub fn closure(&mut self, template: GcRef, free: impl ExactSizeIterator<Item = Value>) -> Value {
+        self.allocations += 1;
+        #[cfg(feature = "gcstats")]
+        self.gc_stats.alloc_compact(1, "closure", free.len());
+        Value::closure(self.small.headed(template, free))
     }
 
     /// The list of `items`.
@@ -443,8 +443,8 @@ impl Marker {
     fn value(&mut self, v: Value) {
         if let Some(r) = v.as_ref() {
             self.obj(r);
-        } else if let Some(p) = v.as_pair()
-            && pairs::mark(p)
+        } else if let Some(p) = v.compact_addr()
+            && space::mark(p)
         {
             self.count += 1;
             self.grey.push(v);
@@ -469,9 +469,14 @@ impl Marker {
     fn trace(&mut self) {
         while let Some(v) = self.grey.pop() {
             let Some(r) = v.as_ref() else {
-                let p = v.as_pair().unwrap();
-                self.value(p.car.get());
-                self.value(p.cdr.get());
+                if let Some(p) = v.as_pair() {
+                    self.value(p.car.get());
+                    self.value(p.cdr.get());
+                } else {
+                    let h = v.as_closure().or(v.as_record()).unwrap();
+                    self.obj(h.link());
+                    h.fields().iter().for_each(|f| self.value(f.get()));
+                }
                 continue;
             };
             match &r.get().kind {
@@ -479,9 +484,9 @@ impl Marker {
                 Obj::Box(value) => self.value(value.get()),
                 Obj::Continuation { stack, frames } => {
                     stack.iter().for_each(|&v| self.value(v));
-                    frames.iter().for_each(|f| self.obj(f.closure));
+                    frames.iter().for_each(|f| self.value(Value::closure(f.closure)));
                 }
-                Obj::Escape { frame, .. } => frame.iter().for_each(|f| self.obj(f.closure)),
+                Obj::Escape { frame, .. } => frame.iter().for_each(|f| self.value(Value::closure(f.closure))),
                 Obj::Values(items) => items.iter().for_each(|&v| self.value(v)),
                 Obj::Error { message, irritants, .. } => {
                     self.value(*message);
@@ -490,10 +495,6 @@ impl Marker {
                 Obj::RecordType { name, fields } => {
                     self.value(*name);
                     fields.iter().for_each(|&f| self.value(f));
-                }
-                Obj::Record { rtype, fields } => {
-                    self.obj(*rtype);
-                    fields.iter().for_each(|f| self.value(f.get()));
                 }
                 Obj::Alias { original, env, .. } => {
                     self.value(*original);
@@ -513,10 +514,6 @@ impl Marker {
                     self.value(value.get());
                 }
                 Obj::Template(t) => t.consts.iter().for_each(|&k| self.value(k)),
-                Obj::Closure { template, free } => {
-                    self.obj(*template);
-                    free.iter().for_each(|v| self.value(v.get()));
-                }
                 Obj::Symbol(_) | Obj::Str(_) | Obj::Bytevector(_) | Obj::BigInt(_) | Obj::Rational(_) | Obj::Primitive(_) | Obj::Port(_) => {}
             }
         }
@@ -772,13 +769,29 @@ mod tests {
                 heap.cons(Value::fixnum(i).unwrap(), Value::NIL);
             }
             heap.collect([kept]);
-            heap.pairs.bytes()
+            heap.small.bytes()
         };
         let bytes = churn(&mut heap);
-        assert_eq!((churn(&mut heap), churn(&mut heap)), (bytes, bytes));
-        // The symbol (a root), the two pairs of `kept`; the cycle and the
-        // string are gone.
-        assert_eq!(heap.len(), 3);
+        // Poison mode never reuses a slot.
+        if !heap.poison {
+            assert_eq!((churn(&mut heap), churn(&mut heap)), (bytes, bytes));
+        }
+        // Records of every size class, and one too large for any, which has
+        // a page of its own: kept while reachable, freed when not.
+        let rtype = heap.record_type(sym, vec![]).as_ref().unwrap();
+        let records: Vec<Value> = [0, 1, 2, 30, 31, 40].iter().map(|&n| heap.record(rtype, (0..n).map(|i| Value::fixnum(i).unwrap()).collect())).collect();
+        let all = heap.list(records);
+        heap.collect([kept, all, Value::obj(rtype)]);
+        let lens: Vec<usize> = list_to_vec(all).unwrap().iter().map(|r| r.as_record().unwrap().fields().len()).collect();
+        assert_eq!(lens, [0, 1, 2, 30, 31, 40]);
+        let last = list_to_vec(all).unwrap()[5].as_record().unwrap().fields()[39].get();
+        assert_eq!(last.as_fixnum(), Some(39));
+        let before = heap.small.bytes();
+        heap.collect([kept]);
+        assert!(heap.poison || heap.small.bytes() < before, "the large record's page is given back");
+        // The symbol (a root), the two pairs of `kept`, and in poison mode
+        // the symbol `<<FREED>>`; the cycle and the string are gone.
+        assert_eq!(heap.len(), 3 + heap.poison as usize);
         assert_eq!(crate::printer::print_value(kept), "(s 1)");
     }
 }
