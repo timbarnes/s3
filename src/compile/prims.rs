@@ -46,7 +46,8 @@ fn binding_datum(heap: &mut Heap, b: TopBinding) -> Value {
 
 fn datum_binding(d: Value) -> Result<TopBinding, Error> {
     let bad = || err!("not a binding: {}", crate::printer::print_value(d));
-    let Some(Obj::Pair { car, cdr }) = kind(d) else { return Err(bad()) };
+    let Some(p) = d.as_pair() else { return Err(bad()) };
+    let (car, cdr) = (&p.car, &p.cdr);
     let tag = car.get().as_ref().filter(|s| matches!(s.get().kind, Obj::Symbol(_))).map(crate::compile::syntax_rules::name).ok_or_else(bad)?;
     let x = cdr.get();
     Ok(match (tag, kind(x)) {
@@ -134,9 +135,9 @@ pub static PRIMITIVES: &[Primitive] = &[
         let literals = list_arg(a[1], who)?.into_iter().map(|l| id_arg(l, who)).collect::<Result<_, _>>()?;
         let rules = list_arg(a[2], who)?
             .into_iter()
-            .map(|r| match kind(r) {
-                Some(Obj::Pair { car, cdr }) => Ok((car.get(), cdr.get())),
-                _ => Err(expected(who, "a (matcher . template) pair", r)),
+            .map(|r| match r.as_pair() {
+                Some(p) => Ok((p.car.get(), p.cdr.get())),
+                None => Err(expected(who, "a (matcher . template) pair", r)),
             })
             .collect::<Result<_, _>>()?;
         let depth = a[3].as_fixnum().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| expected(who, "a depth", a[3]))?;

@@ -32,6 +32,7 @@ mod heap;
 #[allow(dead_code)]
 mod io;
 mod libraries;
+mod pairs;
 #[allow(dead_code)]
 mod printer;
 mod reader;

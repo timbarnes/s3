@@ -173,10 +173,10 @@ struct Writer<'h> {
     target: GcRef,
     /// The object table, as written so far.
     out: Vec<u8>,
-    index: FxHashMap<GcRef, u32>,
+    index: FxHashMap<Value, u32>,
     count: u32,
     /// Objects being written, to refuse circular constants.
-    active: FxHashSet<GcRef>,
+    active: FxHashSet<Value>,
     /// Where each cell and macro is defined: its environment and name.
     home: FxHashMap<GcRef, (GcRef, GcRef)>,
     /// The environments the file's code creates: those of its
@@ -229,8 +229,8 @@ impl Writer<'_> {
     }
 
     fn val(&mut self, v: Value) -> Result<Val, String> {
-        Ok(if let Some(r) = v.as_ref() {
-            Val::Obj(self.obj(r)?)
+        Ok(if v.is_pair() || v.as_ref().is_some() {
+            Val::Obj(self.node(v)?)
         } else if let Some(n) = v.as_fixnum() {
             Val::Fixnum(n)
         } else if let Some(f) = v.as_flonum() {
@@ -253,20 +253,27 @@ impl Writer<'_> {
     /// The index of object `r`, writing it (after everything it refers
     /// to) if it isn't in the table yet.
     fn obj(&mut self, r: GcRef) -> Result<u32, String> {
-        if let Some(&i) = self.index.get(&r) {
+        self.node(Value::obj(r))
+    }
+
+    /// The index of `v`, a pair or an object, as `obj` does.
+    fn node(&mut self, v: Value) -> Result<u32, String> {
+        if let Some(&i) = self.index.get(&v) {
             return Ok(i);
         }
-        if !self.active.insert(r) {
-            return Err(format!("can't compile a circular constant: {}", print_value(Value::obj(r))));
+        if !self.active.insert(v) {
+            return Err(format!("can't compile a circular constant: {}", print_value(v)));
         }
         let mut b = Vec::new();
+        if let Some(p) = v.as_pair() {
+            let (a, d) = (self.val(p.car.get())?, self.val(p.cdr.get())?);
+            b.push(PAIR);
+            put_val(&mut b, a);
+            put_val(&mut b, d);
+            return Ok(self.add(v, b));
+        }
+        let r = v.as_ref().unwrap();
         match &r.get().kind {
-            Obj::Pair { car, cdr } => {
-                let (a, d) = (self.val(car.get())?, self.val(cdr.get())?);
-                b.push(PAIR);
-                put_val(&mut b, a);
-                put_val(&mut b, d);
-            }
             Obj::Symbol(name) => {
                 b.push(SYMBOL);
                 put_str(&mut b, name);
@@ -375,12 +382,17 @@ impl Writer<'_> {
             }
             _ => return Err(format!("can't compile a constant {}", print_value(Value::obj(r)))),
         }
-        self.active.remove(&r);
+        Ok(self.add(v, b))
+    }
+
+    /// Add `v`, written as `b`, to the table.
+    fn add(&mut self, v: Value, b: Vec<u8>) -> u32 {
+        self.active.remove(&v);
         self.out.extend(b);
         let i = self.count;
         self.count += 1;
-        self.index.insert(r, i);
-        Ok(i)
+        self.index.insert(v, i);
+        i
     }
 
     fn env(&mut self, env: GcRef) -> Result<u32, String> {
@@ -396,7 +408,7 @@ impl Writer<'_> {
     fn sort_keys(&self, env: GcRef, keys: &mut [GcRef]) {
         keys.sort_by_cached_key(|&k| {
             let used = match env_of(env).borrow().lookup(k) {
-                Some(TopBinding::Variable(r) | TopBinding::Macro(r)) => self.index.get(&r).copied(),
+                Some(TopBinding::Variable(r) | TopBinding::Macro(r)) => self.index.get(&Value::obj(r)).copied(),
                 _ => None,
             };
             (print_value(Value::obj(k)), used.unwrap_or(u32::MAX))

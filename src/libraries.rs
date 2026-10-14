@@ -617,7 +617,8 @@ fn register_library(heap: &mut Heap, args: &[Value]) -> Result<Value, Error> {
     let Some(Obj::Environment(env)) = kind(args[2]) else { return Err(expected("%register-library", "an environment", args[2])) };
     let mut exports = Vec::new();
     for pair in list_arg(args[1], "%register-library")? {
-        let Some(Obj::Pair { car, cdr }) = kind(pair) else { return Err("%register-library: bad export list".into()) };
+        let Some(p) = pair.as_pair() else { return Err("%register-library: bad export list".into()) };
+        let (car, cdr) = (&p.car, &p.cdr);
         let internal = car.get().as_ref().unwrap();
         let binding = env.borrow().lookup(internal).filter(|&b| bound(b));
         let Some(binding) = binding else {

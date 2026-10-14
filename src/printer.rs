@@ -10,7 +10,7 @@
 //! the kinds of object the reader makes; procedures, ports, records and so
 //! on come back with the phases that add them.
 
-use crate::heap::{GcRef, Obj};
+use crate::heap::Obj;
 use crate::value::Value;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
@@ -55,9 +55,9 @@ struct Ctx {
     /// `display` style.
     write: bool,
     /// Objects that get a label
-    needs: HashSet<GcRef>,
+    needs: HashSet<Value>,
     /// Labels already printed
-    assigned: HashMap<GcRef, usize>,
+    assigned: HashMap<Value, usize>,
 }
 
 /// Print `obj` in `write` or `display` style, labelling per `mode`.
@@ -77,17 +77,18 @@ fn render(obj: Value, write: bool, mode: Labels) -> String {
     out
 }
 
-/// The object, if `v` can be part of a cycle: a pair or vector.
-fn compound(v: Value) -> Option<GcRef> {
-    let r = v.as_ref()?;
-    matches!(r.get().kind, Obj::Pair { .. } | Obj::Vector(_)).then_some(r)
+/// `v`, if it can be part of a cycle: a pair or vector.
+fn compound(v: Value) -> Option<Value> {
+    (v.is_pair() || matches!(v.as_obj().map(|o| &o.kind), Some(Obj::Vector(_)))).then_some(v)
 }
 
 /// The children a label search follows.
-fn children(obj: GcRef) -> Vec<Value> {
-    match &obj.get().kind {
-        Obj::Pair { car, cdr } => vec![car.get(), cdr.get()],
-        Obj::Vector(items) => items.iter().map(|c| c.get()).collect(),
+fn children(v: Value) -> Vec<Value> {
+    if let Some(p) = v.as_pair() {
+        return vec![p.car.get(), p.cdr.get()];
+    }
+    match v.as_obj().map(|o| &o.kind) {
+        Some(Obj::Vector(items)) => items.iter().map(|c| c.get()).collect(),
         _ => Vec::new(),
     }
 }
@@ -95,10 +96,10 @@ fn children(obj: GcRef) -> Vec<Value> {
 /// Pairs and vectors that close a cycle: the targets of back edges in a
 /// depth-first walk (every cycle has one). Iterative, so long lists don't
 /// exhaust the stack.
-fn cycle_targets(root: GcRef) -> HashSet<GcRef> {
+fn cycle_targets(root: Value) -> HashSet<Value> {
     enum Step {
-        Enter(GcRef),
-        Exit(GcRef),
+        Enter(Value),
+        Exit(Value),
     }
     let mut on_path = HashSet::default();
     let mut done = HashSet::default();
@@ -130,7 +131,7 @@ fn cycle_targets(root: GcRef) -> HashSet<GcRef> {
 }
 
 /// Pairs and vectors reachable more than once.
-fn shared_nodes(root: GcRef) -> HashSet<GcRef> {
+fn shared_nodes(root: Value) -> HashSet<Value> {
     let mut seen = HashSet::default();
     let mut shared = HashSet::default();
     let mut stack = vec![root];
@@ -147,7 +148,7 @@ fn shared_nodes(root: GcRef) -> HashSet<GcRef> {
 /// Print `obj` as `#n#` if its label was already printed; otherwise print
 /// `#n=` first if it needs a label. Returns true if it printed a reference
 /// (and nothing more should be printed for `obj`).
-fn label_prefix(out: &mut String, obj: GcRef, ctx: &mut Ctx) -> bool {
+fn label_prefix(out: &mut String, obj: Value, ctx: &mut Ctx) -> bool {
     if !ctx.needs.contains(&obj) {
         return false;
     }
@@ -164,46 +165,47 @@ fn label_prefix(out: &mut String, obj: GcRef, ctx: &mut Ctx) -> bool {
 /// Append the representation of `v` to `out`.
 fn print_into(out: &mut String, v: Value, ctx: &mut Ctx) {
     let write = ctx.write;
+    if v.is_pair() {
+        if label_prefix(out, v, ctx) {
+            return;
+        }
+        out.push('(');
+        let mut current = v;
+        let mut first = true;
+        loop {
+            match current.as_pair() {
+                // A labelled tail is printed in dotted form, so its label
+                // (or reference) can appear.
+                Some(_) if !first && ctx.needs.contains(&current) => {
+                    out.push_str(" . ");
+                    print_into(out, current, ctx);
+                    break;
+                }
+                Some(p) => {
+                    if !first {
+                        out.push(' ');
+                    }
+                    print_into(out, p.car.get(), ctx);
+                    current = p.cdr.get();
+                    first = false;
+                }
+                None if current.is_nil() => break,
+                None => {
+                    out.push_str(" . ");
+                    print_into(out, current, ctx);
+                    break;
+                }
+            }
+        }
+        out.push(')');
+        return;
+    }
     let Some(obj) = v.as_ref() else {
         return print_immediate(out, v, write);
     };
     match &obj.get().kind {
-        Obj::Pair { .. } => {
-            if label_prefix(out, obj, ctx) {
-                return;
-            }
-            out.push('(');
-            let mut current = v;
-            let mut first = true;
-            loop {
-                match current.as_ref().map(|r| (r, &r.get().kind)) {
-                    // A labelled tail is printed in dotted form, so its label
-                    // (or reference) can appear.
-                    Some((r, Obj::Pair { .. })) if !first && ctx.needs.contains(&r) => {
-                        out.push_str(" . ");
-                        print_into(out, current, ctx);
-                        break;
-                    }
-                    Some((_, Obj::Pair { car, cdr })) => {
-                        if !first {
-                            out.push(' ');
-                        }
-                        print_into(out, car.get(), ctx);
-                        current = cdr.get();
-                        first = false;
-                    }
-                    _ if current.is_nil() => break,
-                    _ => {
-                        out.push_str(" . ");
-                        print_into(out, current, ctx);
-                        break;
-                    }
-                }
-            }
-            out.push(')');
-        }
         Obj::Vector(items) => {
-            if label_prefix(out, obj, ctx) {
+            if label_prefix(out, v, ctx) {
                 return;
             }
             out.push_str("#(");
@@ -261,10 +263,10 @@ fn print_into(out: &mut String, v: Value, ctx: &mut Ctx) {
             ctx.write = true;
             print_into(out, *message, ctx);
             let mut rest = *irritants;
-            while let Some(Obj::Pair { car, cdr }) = rest.as_obj().map(|o| &o.kind) {
+            while let Some(p) = rest.as_pair() {
                 out.push(' ');
-                print_into(out, car.get(), ctx);
-                rest = cdr.get();
+                print_into(out, p.car.get(), ctx);
+                rest = p.cdr.get();
             }
             ctx.write = saved;
             out.push('>');
@@ -552,9 +554,7 @@ mod tests {
         assert_eq!(print_value(both), "((a) (a))");
         assert_eq!(write_shared_value(both), "(#0=(a) #0#)");
         let cell = heap.cons(a, Value::NIL);
-        if let Obj::Pair { cdr, .. } = &cell.as_obj().unwrap().kind {
-            cdr.set(cell);
-        }
+        cell.as_pair().unwrap().cdr.set(cell);
         assert_eq!(print_value(cell), "#0=(a . #0#)");
     }
 }

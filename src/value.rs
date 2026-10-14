@@ -13,6 +13,7 @@
 //! | 2 | a `GcRef`: the heap object's address (user-space addresses fit in 48 bits) |
 //! | 3 | a character |
 //! | 4 | a constant: `()`, `#f`, `#t`, unspecified, eof, undefined |
+//! | 5 | a pair: its slot's address (`pairs.rs`) |
 //!
 //! Tag 0 would be the NaN `0xFFF8_0000_0000_0000`, which `flonum` never
 //! stores, so a word is a flonum exactly when it is below `0xFFF9 << 48`.
@@ -21,7 +22,10 @@
 //! constructors and constants below and takes them apart with the
 //! accessors, never by looking at the bits.
 
+use std::ptr::NonNull;
+
 use crate::heap::{GcObject, GcRef};
+use crate::pairs::Pair;
 
 /// The smallest fixnum. Fixnums are 48-bit signed integers, what fits in
 /// a NaN-boxed payload; integers outside the range are bignums.
@@ -29,8 +33,9 @@ pub const FIXNUM_MIN: i64 = -(1 << 47);
 /// The largest fixnum.
 pub const FIXNUM_MAX: i64 = (1 << 47) - 1;
 
-/// A Scheme value.
-#[derive(Clone, Copy)]
+/// A Scheme value. Equal and hashed by its bits, which is `eq?`: maps
+/// keyed by a heap value key by its identity.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Value(u64);
 
 const TAG_SHIFT: u32 = 48;
@@ -42,6 +47,7 @@ const FIXNUM: u64 = 1;
 const OBJ: u64 = 2;
 const CHAR: u64 = 3;
 const CONST: u64 = 4;
+const PAIR: u64 = 5;
 /// The one NaN a flonum holds: positive, quiet, no payload.
 const CANONICAL_NAN: u64 = 0x7FF8_0000_0000_0000;
 
@@ -85,6 +91,34 @@ impl Value {
         let addr = r.addr();
         debug_assert!(addr <= PAYLOAD, "heap address {:#x} doesn't fit in 48 bits", addr);
         Value(boxed(OBJ, addr))
+    }
+
+    pub fn pair(p: NonNull<Pair>) -> Value {
+        let addr = p.as_ptr() as u64;
+        debug_assert!(addr <= PAYLOAD, "heap address {:#x} doesn't fit in 48 bits", addr);
+        Value(boxed(PAIR, addr))
+    }
+
+    /// The pair, if this value is one. The lifetime is unbounded, as for
+    /// `GcRef::get`.
+    #[inline]
+    pub fn as_pair<'a>(self) -> Option<&'a Pair> {
+        // SAFETY: only `pair` makes a PAIR payload, from a live pair.
+        (self.tag() == PAIR).then(|| unsafe { &*((self.0 & PAYLOAD) as *const Pair) })
+    }
+
+    pub fn is_pair(self) -> bool {
+        self.tag() == PAIR
+    }
+
+    /// The value's bits, and the value with these bits: for `pairs.rs`'
+    /// free list only.
+    pub(crate) fn bits(self) -> u64 {
+        self.0
+    }
+
+    pub(crate) fn from_bits(bits: u64) -> Value {
+        Value(bits)
     }
 
     pub fn as_fixnum(self) -> Option<i64> {
@@ -157,6 +191,8 @@ impl std::fmt::Debug for Value {
             write!(f, "Char({:?})", c)
         } else if let Some(r) = self.as_ref() {
             write!(f, "Obj({:?})", r)
+        } else if self.is_pair() {
+            write!(f, "Pair({:#x})", self.0 & PAYLOAD)
         } else {
             let names = ["Nil", "False", "True", "Unspecified", "Eof", "Undefined"];
             f.write_str(names[(self.0 & PAYLOAD) as usize])
@@ -203,7 +239,7 @@ mod tests {
         for (i, a) in constants.iter().enumerate() {
             assert_eq!((a.as_fixnum(), a.as_flonum(), a.as_char(), a.as_ref().is_some()), (None, None, None, false));
             for (j, b) in constants.iter().enumerate() {
-                assert_eq!(a.eq(*b), i == j);
+                assert_eq!(Value::eq(*a, *b), i == j);
             }
         }
         assert_eq!((Value::TRUE.as_bool(), Value::FALSE.as_bool(), Value::NIL.as_bool()), (Some(true), Some(false), None));

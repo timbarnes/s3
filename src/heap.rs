@@ -1,8 +1,9 @@
 //! The heap: object layout, allocation and the symbol table (plan/03 §3-4).
 //!
 //! Every object is one slot of `Slots`: pages of same-sized slots, with a
-//! free list (heap step 2, plan/09). Objects never move, so a `GcRef`
-//! stays valid for as long as the object is alive.
+//! free list (heap step 2, plan/09), except pairs, which have pages of
+//! 16-byte slots of their own (`pairs.rs`, plan/11 G1). Objects never
+//! move, so a `GcRef` stays valid for as long as the object is alive.
 //! Mutable fields are `Cell`s (or a `RefCell` for strings), so all access is
 //! through shared references, unlike s1's `get_value_mut(&self)`.
 //!
@@ -36,6 +37,7 @@ use crate::compile::syntax_rules::SyntaxRules;
 use crate::globals::{Env, env_of};
 use crate::io::PortKind;
 use crate::libraries::Libraries;
+use crate::pairs::{self, Pairs};
 use crate::sstring::SString;
 use crate::value::Value;
 use crate::vm::{Frame, Template};
@@ -80,8 +82,8 @@ pub struct GcObject {
 const _: () = assert!(std::mem::size_of::<GcObject>() == 80);
 
 /// The kinds of heap object.
+/// Pairs are not among them (`pairs.rs`).
 pub enum Obj {
-    Pair { car: Cell<Value>, cdr: Cell<Value> },
     /// An interned symbol. Its name never changes.
     Symbol(Box<str>),
     Str(RefCell<SString>),
@@ -156,6 +158,7 @@ const GC_GROWTH: usize = 2;
 /// Owns every heap object.
 pub struct Heap {
     slots: Slots,
+    pairs: Pairs,
     symbols: FxHashMap<Box<str>, GcRef>,
     /// Allocations since the last collection.
     allocations: usize,
@@ -163,7 +166,7 @@ pub struct Heap {
     live_after_gc: usize,
     epoch: u64,
     /// The mark worklist, kept between collections to reuse its capacity.
-    worklist: Vec<GcRef>,
+    worklist: Vec<Value>,
     /// Collect at every safepoint.
     pub stress: bool,
     /// Poison freed objects instead of freeing them.
@@ -190,12 +193,13 @@ impl Heap {
     /// The number of objects on the heap, live or not yet collected.
     #[cfg(test)]
     pub fn object_count(&self) -> usize {
-        self.slots.count
+        self.slots.count + self.pairs.count
     }
 
     pub fn new() -> Heap {
-        Heap {
+        let mut heap = Heap {
             slots: Slots::default(),
+            pairs: Pairs::default(),
             symbols: FxHashMap::default(),
             allocations: 0,
             live_after_gc: 0,
@@ -211,7 +215,13 @@ impl Heap {
             pinned: Vec::new(),
             #[cfg(feature = "gcstats")]
             gc_stats: Default::default(),
+        };
+        if heap.poison {
+            // What freed pairs hold (`collect`); interned now, since a
+            // symbol made during a collection would be swept by it.
+            heap.intern("<<FREED>>");
         }
+        heap
     }
 
     fn alloc(&mut self, kind: Obj) -> Value {
@@ -223,7 +233,7 @@ impl Heap {
 
     /// The number of objects in the heap, live or not yet collected.
     pub fn len(&self) -> usize {
-        self.slots.count
+        self.slots.count + self.pairs.count
     }
 
     /// Whether the next safepoint should collect: in stress mode always;
@@ -246,6 +256,7 @@ impl Heap {
         self.epoch += 1;
         #[cfg(feature = "gcstats")]
         let t0 = std::time::Instant::now();
+        self.pairs.clear_marks();
         let mut m = Marker { epoch: self.epoch, grey: std::mem::take(&mut self.worklist), count: 0, #[cfg(feature = "gcstats")] young: 0 };
         roots.into_iter().for_each(|v| m.value(v));
         self.symbols.values().for_each(|&r| m.obj(r));
@@ -260,6 +271,9 @@ impl Heap {
         let t1 = std::time::Instant::now();
 
         self.slots.sweep(self.epoch, self.poison, #[cfg(feature = "gcstats")] &mut self.gc_stats);
+        let freed = self.symbols.get("<<FREED>>").map_or(Value::UNDEFINED, |&r| Value::obj(r));
+        debug_assert!(!self.poison || !freed.is_undefined());
+        self.pairs.sweep(self.poison, freed);
         #[cfg(feature = "gcstats")]
         {
             let st = &mut self.gc_stats;
@@ -268,11 +282,12 @@ impl Heap {
             st.young += self.allocations as u64;
             st.young_survived += m.young as u64;
             st.old_marked += (m.count - m.young) as u64;
-            st.peak_live = st.peak_live.max(self.slots.count);
-            st.peak_slots = st.peak_slots.max(self.slots.pages.len() * PAGE_SLOTS);
+            let slot = std::mem::size_of::<GcObject>();
+            st.peak_live = st.peak_live.max(self.slots.count * slot + self.pairs.count * std::mem::size_of::<pairs::Pair>());
+            st.peak_slots = st.peak_slots.max(self.slots.pages.len() * PAGE_SLOTS * slot + self.pairs.bytes());
         }
         self.allocations = 0;
-        self.live_after_gc = self.slots.count;
+        self.live_after_gc = self.slots.count + self.pairs.count;
     }
 
     /// Print the collector's statistics (`gcstats.rs`), before the process
@@ -296,7 +311,10 @@ impl Heap {
     }
 
     pub fn cons(&mut self, car: Value, cdr: Value) -> Value {
-        self.alloc(Obj::Pair { car: Cell::new(car), cdr: Cell::new(cdr) })
+        self.allocations += 1;
+        #[cfg(feature = "gcstats")]
+        self.gc_stats.alloc_pair();
+        Value::pair(self.pairs.alloc(car, cdr))
     }
 
     /// The symbol named `name`, the same object every time.
@@ -413,7 +431,7 @@ impl Heap {
 /// on `grey`, so an object reachable by several paths is traced once.
 struct Marker {
     epoch: u64,
-    grey: Vec<GcRef>,
+    grey: Vec<Value>,
     count: usize,
     /// Of `count`, the objects never marked before: allocated since the
     /// last collection.
@@ -425,6 +443,11 @@ impl Marker {
     fn value(&mut self, v: Value) {
         if let Some(r) = v.as_ref() {
             self.obj(r);
+        } else if let Some(p) = v.as_pair()
+            && pairs::mark(p)
+        {
+            self.count += 1;
+            self.grey.push(v);
         }
     }
 
@@ -437,19 +460,21 @@ impl Marker {
             }
             mark.set(self.epoch);
             self.count += 1;
-            self.grey.push(r);
+            self.grey.push(Value::obj(r));
         }
     }
 
     /// Mark everything reachable from the grey objects. The match has no
     /// `_` arm, so a new kind of object must say what it refers to.
     fn trace(&mut self) {
-        while let Some(r) = self.grey.pop() {
+        while let Some(v) = self.grey.pop() {
+            let Some(r) = v.as_ref() else {
+                let p = v.as_pair().unwrap();
+                self.value(p.car.get());
+                self.value(p.cdr.get());
+                continue;
+            };
             match &r.get().kind {
-                Obj::Pair { car, cdr } => {
-                    self.value(car.get());
-                    self.value(cdr.get());
-                }
                 Obj::Vector(items) => items.iter().for_each(|c| self.value(c.get())),
                 Obj::Box(value) => self.value(value.get()),
                 Obj::Continuation { stack, frames } => {
@@ -522,7 +547,7 @@ struct EqualState {
     /// Node pairs compared so far.
     steps: usize,
     /// Node pairs under comparison; only kept once `steps` is large.
-    seen: Option<rustc_hash::FxHashSet<(GcRef, GcRef)>>,
+    seen: Option<rustc_hash::FxHashSet<(Value, Value)>>,
 }
 
 /// Steps after which `equal` starts tracking visited node pairs.
@@ -534,7 +559,7 @@ impl EqualState {
         self.steps += 1;
         if self.steps > EQUAL_TRACKING_AFTER {
             let seen = self.seen.get_or_insert_with(Default::default);
-            return seen.insert((a.as_ref().unwrap(), b.as_ref().unwrap()));
+            return seen.insert((a, b));
         }
         true
     }
@@ -544,17 +569,18 @@ impl EqualState {
 /// recurse.
 fn equal_with(mut a: Value, mut b: Value, st: &mut EqualState) -> bool {
     loop {
-        match (a.as_obj().map(|o| &o.kind), b.as_obj().map(|o| &o.kind)) {
-            (Some(Obj::Pair { car: a1, cdr: d1 }), Some(Obj::Pair { car: a2, cdr: d2 })) => {
-                if !st.first_visit(a, b) {
-                    return true;
-                }
-                if !equal_with(a1.get(), a2.get(), st) {
-                    return false;
-                }
-                a = d1.get();
-                b = d2.get();
+        if let (Some(p), Some(q)) = (a.as_pair(), b.as_pair()) {
+            if !st.first_visit(a, b) {
+                return true;
             }
+            if !equal_with(p.car.get(), q.car.get(), st) {
+                return false;
+            }
+            a = p.cdr.get();
+            b = q.cdr.get();
+            continue;
+        }
+        match (a.as_obj().map(|o| &o.kind), b.as_obj().map(|o| &o.kind)) {
             (Some(Obj::Vector(x)), Some(Obj::Vector(y))) => {
                 if x.len() != y.len() {
                     return false;
@@ -574,9 +600,9 @@ fn equal_with(mut a: Value, mut b: Value, st: &mut EqualState) -> bool {
 /// The elements of a proper list, or None if `v` is not one.
 pub fn list_to_vec(mut v: Value) -> Option<Vec<Value>> {
     let mut items = Vec::new();
-    while let Some(Obj::Pair { car, cdr }) = v.as_obj().map(|o| &o.kind) {
-        items.push(car.get());
-        v = cdr.get();
+    while let Some(p) = v.as_pair() {
+        items.push(p.car.get());
+        v = p.cdr.get();
     }
     v.is_nil().then_some(items)
 }
@@ -735,11 +761,21 @@ mod tests {
         let sym = heap.intern("s");
         let kept = heap.list(vec![sym, Value::fixnum(1).unwrap()]);
         let cycle = heap.cons(Value::NIL, Value::NIL);
-        if let Some(Obj::Pair { cdr, .. }) = cycle.as_obj().map(|o| &o.kind) {
-            cdr.set(cycle);
-        }
+        cycle.as_pair().unwrap().cdr.set(cycle);
         heap.string("garbage");
         heap.collect([kept]);
+        assert_eq!(crate::printer::print_value(kept), "(s 1)");
+        // Pairs: the slots of dead ones are reused, so making as many again
+        // needs no new page.
+        let mut churn = |heap: &mut Heap| {
+            for i in 0..10_000 {
+                heap.cons(Value::fixnum(i).unwrap(), Value::NIL);
+            }
+            heap.collect([kept]);
+            heap.pairs.bytes()
+        };
+        let bytes = churn(&mut heap);
+        assert_eq!((churn(&mut heap), churn(&mut heap)), (bytes, bytes));
         // The symbol (a root), the two pairs of `kept`; the cycle and the
         // string are gone.
         assert_eq!(heap.len(), 3);

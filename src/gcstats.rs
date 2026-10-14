@@ -18,8 +18,8 @@ pub struct GcStats {
     kinds: [(&'static str, u64, u64); KINDS],
     pub mark: Duration,
     pub sweep: Duration,
-    /// Objects allocated since the collection before, at each collection,
-    /// summed: what a minor collection would sweep.
+    /// Objects (not pairs) allocated since the collection before, at each
+    /// collection, summed: what a minor collection would sweep.
     pub young: u64,
     /// Of those, the ones marked: survivors of their first collection.
     pub young_survived: u64,
@@ -29,6 +29,7 @@ pub struct GcStats {
     /// Objects freed, and how many of them had something boxed to free.
     pub freed: u64,
     pub freed_boxed: u64,
+    /// Bytes in the slots of live objects and pairs, and in the pages.
     pub peak_live: usize,
     pub peak_slots: usize,
 }
@@ -55,7 +56,6 @@ impl Default for GcStats {
 fn describe(kind: &Obj) -> (usize, &'static str, u64) {
     use std::mem::size_of;
     let (i, name, bytes) = match kind {
-        Obj::Pair { .. } => (0, "pair", 0),
         Obj::Symbol(s) => (1, "symbol", s.len()),
         Obj::Str(s) => (2, "string", s.borrow().as_str().len()),
         Obj::Vector(v) => (3, "vector", v.len() * 8),
@@ -82,6 +82,11 @@ fn describe(kind: &Obj) -> (usize, &'static str, u64) {
 }
 
 impl GcStats {
+    pub fn alloc_pair(&mut self) {
+        let k = &mut self.kinds[0];
+        *k = ("pair", k.1 + 1, 0);
+    }
+
     pub fn alloc(&mut self, kind: &Obj) {
         let (i, name, bytes) = describe(kind);
         let k = &mut self.kinds[i];
@@ -93,6 +98,7 @@ impl GcStats {
         describe(kind).2 > 0
     }
 
+    /// `slot` is an object slot's size; a pair's is 16.
     pub fn report(&self, collections: usize, marked: usize, slot: usize) {
         let run = self.start.elapsed().as_secs_f64();
         let pct = |a: f64, b: f64| if b > 0.0 { 100.0 * a / b } else { 0.0 };
@@ -101,27 +107,21 @@ impl GcStats {
         eprintln!("gc: {} collections in {:.3}s: mark {:.3}s ({:.1}%), sweep {:.3}s ({:.1}%)", collections, run, mark, pct(mark, run), sweep, pct(sweep, run));
         eprintln!("gc: {} objects allocated; {} marked in all", objects, marked);
         eprintln!(
-            "gc: young at a collection {}, survived it {} ({:.1}%); old objects re-marked {} ({:.1}% of marking)",
+            "gc: objects (not pairs) young at a collection {}, survived it {} ({:.1}%); old objects re-marked {}",
             self.young,
             self.young_survived,
             pct(self.young_survived as f64, self.young as f64),
             self.old_marked,
-            pct(self.old_marked as f64, marked as f64)
         );
         eprintln!("gc: freed {}, {} with a box ({:.1}%)", self.freed, self.freed_boxed, pct(self.freed_boxed as f64, self.freed as f64));
         let mb = |n: f64| n / (1 << 20) as f64;
-        eprintln!(
-            "gc: peak live {} objects ({:.1}MB of slots); peak slots {} ({:.1}MB)",
-            self.peak_live,
-            mb((self.peak_live * slot) as f64),
-            self.peak_slots,
-            mb((self.peak_slots * slot) as f64)
-        );
+        eprintln!("gc: peak live {:.1}MB of slots; peak pages {:.1}MB", mb(self.peak_live as f64), mb(self.peak_slots as f64));
         let mut rows: Vec<_> = self.kinds.iter().filter(|k| k.1 > 0).collect();
         rows.sort_by(|a, b| b.1.cmp(&a.1));
         eprintln!("gc: allocations by kind (objects, % of objects, MB in slots, MB outside):");
         for (name, n, bytes) in rows {
-            eprintln!("{:>14} {:5.1}% {:9.1} {:9.1}  {}", n, pct(*n as f64, objects as f64), mb((*n as usize * slot) as f64), mb(*bytes as f64), name);
+            let size = if *name == "pair" { 16 } else { slot };
+            eprintln!("{:>14} {:5.1}% {:9.1} {:9.1}  {}", n, pct(*n as f64, objects as f64), mb((*n as usize * size) as f64), mb(*bytes as f64), name);
         }
     }
 }

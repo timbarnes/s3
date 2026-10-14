@@ -61,32 +61,34 @@ pub fn strip_datum(heap: &mut Heap, datum: Value) -> Value {
     copy_stripped(heap, datum)
 }
 
-fn contains_alias(datum: Value, seen: &mut FxHashSet<GcRef>, cyclic: &mut bool) -> bool {
+fn contains_alias(datum: Value, seen: &mut FxHashSet<Value>, cyclic: &mut bool) -> bool {
+    if (datum.is_pair() || matches!(kind(datum), Some(Obj::Vector(_)))) && !seen.insert(datum) {
+        *cyclic = true;
+        return false;
+    }
+    if let Some(p) = datum.as_pair() {
+        // Bitwise `|` so both sides are always walked (for `cyclic`).
+        return contains_alias(p.car.get(), seen, cyclic) | contains_alias(p.cdr.get(), seen, cyclic);
+    }
     match kind(datum) {
         Some(Obj::Alias { .. }) => true,
-        Some(Obj::Pair { .. } | Obj::Vector(_)) if !seen.insert(datum.as_ref().unwrap()) => {
-            *cyclic = true;
-            false
-        }
-        // Bitwise `|` so both sides are always walked (for `cyclic`).
-        Some(Obj::Pair { car, cdr }) => contains_alias(car.get(), seen, cyclic) | contains_alias(cdr.get(), seen, cyclic),
         Some(Obj::Vector(items)) => items.iter().fold(false, |any, c| any | contains_alias(c.get(), seen, cyclic)),
         _ => false,
     }
 }
 
 fn copy_stripped(heap: &mut Heap, datum: Value) -> Value {
+    if datum.is_pair() {
+        let (items, tail) = list_parts(datum);
+        let mut result = copy_stripped(heap, tail);
+        for item in items.into_iter().rev() {
+            let item = copy_stripped(heap, item);
+            result = heap.cons(item, result);
+        }
+        return result;
+    }
     match kind(datum) {
         Some(Obj::Alias { .. }) => Value::obj(strip(datum.as_ref().unwrap())),
-        Some(Obj::Pair { .. }) => {
-            let (items, tail) = list_parts(datum);
-            let mut result = copy_stripped(heap, tail);
-            for item in items.into_iter().rev() {
-                let item = copy_stripped(heap, item);
-                result = heap.cons(item, result);
-            }
-            result
-        }
         Some(Obj::Vector(items)) => {
             let items: Vec<Value> = items.iter().map(|c| c.get()).collect();
             let copied = items.into_iter().map(|i| copy_stripped(heap, i)).collect();
@@ -100,9 +102,9 @@ fn copy_stripped(heap: &mut Heap, datum: Value) -> Value {
 pub fn list_parts(list: Value) -> (Vec<Value>, Value) {
     let mut items = Vec::new();
     let mut rest = list;
-    while let Some(Obj::Pair { car, cdr }) = kind(rest) {
-        items.push(car.get());
-        rest = cdr.get();
+    while let Some(p) = rest.as_pair() {
+        items.push(p.car.get());
+        rest = p.cdr.get();
     }
     (items, rest)
 }

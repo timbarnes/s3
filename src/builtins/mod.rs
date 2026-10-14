@@ -148,10 +148,7 @@ pub fn expected(who: &str, what: &str, v: Value) -> Error {
 }
 
 pub fn pair_arg<'a>(v: Value, who: &str) -> Result<(&'a Cell<Value>, &'a Cell<Value>), Error> {
-    match kind(v) {
-        Some(Obj::Pair { car, cdr }) => Ok((car, cdr)),
-        _ => Err(expected(who, "a pair", v)),
-    }
+    v.as_pair().map(|p| (&p.car, &p.cdr)).ok_or_else(|| expected(who, "a pair", v))
 }
 
 pub fn char_arg(v: Value, who: &str) -> Result<char, Error> {

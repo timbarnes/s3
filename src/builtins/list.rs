@@ -2,8 +2,8 @@
 //! `for-each`, `member` and `assoc`, which call procedures, are in
 //! `scheme/core.scm`.
 
-use super::{Error, err, Primitive, expected, fixnum, index_arg, kind, list_arg, pair_arg, prim};
-use crate::heap::{Heap, Obj, eqv};
+use super::{Error, err, Primitive, expected, fixnum, index_arg, list_arg, pair_arg, prim};
+use crate::heap::{Heap, eqv};
 use crate::value::Value;
 
 pub static PRIMITIVES: &[Primitive] = &[
@@ -78,7 +78,7 @@ pub static PRIMITIVES: &[Primitive] = &[
 // Named, because the VM calls them when an inlined use's fast path
 // doesn't apply (`vm/machine.rs`).
 pub fn pair_q(_: &mut Heap, a: &[Value]) -> Result<Value, Error> {
-    Ok(Value::bool(matches!(kind(a[0]), Some(Obj::Pair { .. }))))
+    Ok(Value::bool(a[0].is_pair()))
 }
 
 pub fn null_q(_: &mut Heap, a: &[Value]) -> Result<Value, Error> {

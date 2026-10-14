@@ -15,7 +15,7 @@
 //! a bad literal deep in a list doesn't make the reader misread the rest of
 //! the list as new top-level forms.
 
-use crate::heap::{GcRef, Heap, Obj};
+use crate::heap::{Heap, Obj};
 use crate::io::PortKind;
 use crate::reader::number_syntax::{Number, NumberSyntax, parse_number};
 use crate::reader::tokenizer::{Token, Tokenizer};
@@ -212,7 +212,7 @@ impl Reader<'_, '_> {
 /// from `root` with `to`. The structure may already be cyclic, so each
 /// object is visited once.
 fn replace_refs(root: Value, from: Value, to: Value) {
-    let mut seen: HashSet<GcRef> = HashSet::default();
+    let mut seen: HashSet<Value> = HashSet::default();
     let mut work = vec![root];
     let swap = |slot: &std::cell::Cell<Value>| {
         if slot.get().eq(from) {
@@ -221,17 +221,14 @@ fn replace_refs(root: Value, from: Value, to: Value) {
         slot.get()
     };
     while let Some(v) = work.pop() {
-        let Some(r) = v.as_ref() else { continue };
-        if !seen.insert(r) {
+        if !(v.is_pair() || v.as_ref().is_some()) || !seen.insert(v) {
             continue;
         }
-        match &r.get().kind {
-            Obj::Pair { car, cdr } => {
-                work.push(swap(car));
-                work.push(swap(cdr));
-            }
-            Obj::Vector(elems) => work.extend(elems.iter().map(swap)),
-            _ => {}
+        if let Some(p) = v.as_pair() {
+            work.push(swap(&p.car));
+            work.push(swap(&p.cdr));
+        } else if let Some(Obj::Vector(elems)) = v.as_obj().map(|o| &o.kind) {
+            work.extend(elems.iter().map(swap));
         }
     }
 }
@@ -296,10 +293,7 @@ mod tests {
         let mut heap = Heap::new();
         let mut port = crate::io::new_string_port_input("#0=(a b . #0#)");
         let expr = parse(&mut heap, &mut port).unwrap();
-        let cdr = |v: Value| match &v.as_obj().unwrap().kind {
-            Obj::Pair { cdr, .. } => cdr.get(),
-            _ => panic!("not a pair"),
-        };
+        let cdr = |v: Value| v.as_pair().expect("not a pair").cdr.get();
         assert!(cdr(cdr(expr)).eq(expr), "the tail refers back to the list");
 
         assert_eq!(read_ok("(#1=(x) #1#)"), ["((x) (x))"]);

@@ -161,6 +161,67 @@ with its tag, which the `Value` itself already is.
 - **Target:** peak RSS halved or better on earley, mperm and nboyer, with
   no benchmark more than 3% slower.
 
+### G1 results (2026-10-13)
+
+Done as planned (`src/pairs.rs`). Some details settled while building
+it:
+
+- The header is 1.5KB, the page's first 96 slots, which leaves 4,000
+  pairs a page. It holds the mark bits, and for poison mode a bit per
+  poisoned slot and a scratch bit per slot that was free before the
+  collection: those slots stay free, and the other unmarked ones are
+  poisoned.
+- Rust code that keys maps by identity now keys them by `Value`, which
+  is `Eq` and `Hash` on its bits (`eq?`). This covers the printer's
+  labels, the reader's datum labels, `equal?`'s cycle check, `fasl.rs`'
+  object table and `strip_datum`. `GcRef` is for objects only.
+- `<<FREED>>` is interned when the heap is made in poison mode. Interning
+  it during a collection would make a symbol that the same collection
+  sweeps.
+- **No `#[inline]` on `cons`.** With it, `fib` was 16% slower in cycles
+  with 0.9% more instructions: the dispatch loop's layout again (09).
+  Without it, `fib` and the pair-heavy programs both did better.
+
+Tests: all 109 pass in release, in debug, and with stress and poison
+together. chibi's suite gives 1154, the baseline.
+
+**Peak RSS** (`/usr/bin/time -l`, against G0's binary):
+
+| | before | G1 | |
+|---|---:|---:|---:|
+| nboyer | 2822MB | 523MB | 5.4x less |
+| mperm | 3940MB | 1485MB | 2.7x less |
+| earley | 8128MB | 4000MB | 2.0x less |
+| paraffins | 1181MB | 839MB | 1.4x less |
+
+The target is met: earley, mperm and nboyer are halved or better.
+earley's 4GB is now mostly closures, 80 bytes plus their boxed free
+variables, which is G2's subject.
+
+**Cycles**, the median of 3 runs, before divided by after, so higher is
+faster:
+
+| | | | | | |
+|---|---:|---|---:|---|---:|
+| earley | 1.27 | mperm | 1.15 | divrec | 1.12 |
+| nboyer | 1.10 | paraffins | 1.10 | nqueens | 1.08 |
+| primes | 1.08 | sum | 1.07 | deriv | 1.06 |
+| bench/listmap | 1.05 | browse | 1.05 | destruc | 1.04 |
+| sboyer | 1.04 | bench/gen | 1.03 | puzzle | 1.03 |
+| bench/program | 1.02 | bench/deeprec | 1.02 | array1 | 1.02 |
+| bench/tail | 1.01 | pnpoly | 1.01 | bench/guard | 1.00 |
+| bench/macro-loop | 1.00 | cpstak | 1.00 | fib | 0.99 |
+| bench/fib | 0.98 | bench/tak | 0.98 | gcbench | 0.97 |
+| tak | 0.97 | | | | |
+
+The geometric mean over these 28 is 1.04x. The programs that use pairs
+gain from smaller objects and a cheaper sweep. Those that don't (`fib`,
+`tak`, `cpstak`, and `gcbench`, which uses records) lose 0-3%. Their
+code didn't change, so this is the dispatch loop's layout again.
+**`tak`, at 0.969, is just past the 3% limit.** Chasing it means trying
+layouts until one happens to suit it, which 09 found doesn't last. Left
+as it is.
+
 ### G2. Compact closures and records (if G1 pays)
 
 Closures are most of the objects that aren't pairs: 22% in mperm, 30% in

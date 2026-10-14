@@ -122,10 +122,7 @@ fn cold<T>(f: impl FnOnce() -> T) -> T {
 }
 
 fn pair_of<'a>(v: Value) -> Option<(&'a std::cell::Cell<Value>, &'a std::cell::Cell<Value>)> {
-    match v.as_obj().map(|o| &o.kind) {
-        Some(Obj::Pair { car, cdr }) => Some((car, cdr)),
-        _ => None,
-    }
+    v.as_pair().map(|p| (&p.car, &p.cdr))
 }
 
 fn vector_of<'a>(v: Value) -> Option<&'a [std::cell::Cell<Value>]> {

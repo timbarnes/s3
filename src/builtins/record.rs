@@ -43,7 +43,7 @@ fn field_index(rtype: Value, field: Value, who: &str) -> Result<usize, Error> {
     let (name, fields) = record_type(rtype, who)?;
     fields
         .iter()
-        .position(|f| f.eq(field))
+        .position(|&f| f.eq(field))
         .ok_or_else(|| err!("{}: {} has no field {}", who, print_value(name), print_value(field)))
 }
 
@@ -103,14 +103,11 @@ fn record_fields<'a>(obj: Value, rtype: Value, who: &str) -> Result<&'a [std::ce
 fn make_record_type(heap: &mut Heap, args: &[Value]) -> Result<Value, Error> {
     let mut fields: Vec<Value> = Vec::new();
     for spec in list_arg(args[1], "%make-record-type")? {
-        let name = match kind(spec) {
-            Some(Obj::Pair { car, .. }) => car.get(),
-            _ => spec,
-        };
+        let name = spec.as_pair().map_or(spec, |p| p.car.get());
         if !matches!(kind(name), Some(Obj::Symbol(_))) {
             return Err(err!("define-record-type: bad field spec {}", print_value(spec)));
         }
-        if fields.iter().any(|f| f.eq(name)) {
+        if fields.iter().any(|&f| f.eq(name)) {
             return Err(err!("define-record-type: duplicate field {}", print_value(name)));
         }
         fields.push(name);

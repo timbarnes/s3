@@ -217,14 +217,14 @@ fn port<'a>(v: Value, who: &str) -> Result<&'a RefCell<PortKind>, Error> {
 fn current_port(vm: &mut Vm, heap: &mut Heap, args: &[Value], which: usize, checker: &str) -> Result<Value, Error> {
     match args {
         [] => Ok(vm.ports[which]),
-        [m] if m.eq(heap.intern("%param-converter")) => {
+        [m] if Value::eq(*m, heap.intern("%param-converter")) => {
             let name = heap.intern(checker).as_ref().unwrap();
             match env_of(heap.system.unwrap()).borrow().lookup(name) {
                 Some(TopBinding::Variable(cell)) => Ok(cell_value(cell).get()),
                 _ => Err(err!("{} is not defined", checker)),
             }
         }
-        [m, port] if m.eq(heap.intern("%param-set")) => {
+        [m, port] if Value::eq(*m, heap.intern("%param-set")) => {
             vm.ports[which] = *port;
             Ok(Value::UNSPECIFIED)
         }
