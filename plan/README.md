@@ -48,6 +48,8 @@ in `docs/`).
 | [07-comparison.md](07-comparison.md) | P12, updated for s3: s3 against s2, s1 and eight other Schemes, in architecture, completeness, features and performance |
 | [08-compiler-in-scheme.md](08-compiler-in-scheme.md) | The plan for P13: the decisions to settle, sub-phases P13.0-P13.6 and their exit tests, and the risks |
 | [09-s3.md](09-s3.md) | s3: S0 removes the Rust compiler, commits the boot images and adds a verifier; what follows |
+| [10-native.md](10-native.md) | Native code, for review: templates translated to C in Scheme, loaded with `dlopen`, calls through the dispatch loop; phases N0-N6. Follows 11 |
+| [11-collector.md](11-collector.md) | A generational collector, for review: non-moving, sticky mark bits, a write barrier enforced by type; phases G0-G5. Comes before 10 |
 
 Read them in order the first time. During implementation, 04 is the working
 document, and 03 is the reference for why things are shaped as they are.
@@ -67,7 +69,7 @@ Already made by the user:
 | U7 | Where the compiler in Scheme is built | In this repository, tagged first; not a fork (06 §1) |
 | U8 | Phases after P11 | P12 comparison with other Schemes, P13 the compiler in Scheme |
 | U9 | Embedded targets (ESP32) | Not planned (06 §4) |
-| U10 | Native code | Not planned for now (06 §5) |
+| U10 | Native code | Not planned for now (06 §5). Proposed in 10, on the `native` branch |
 | C1-C11 | The compiler in Scheme | Settled before P13 (08): environments stay in Rust, the Scheme compiler must produce the Rust compiler's code exactly, back end first |
 
 Recommended in these documents, each to be confirmed:
