@@ -2,7 +2,7 @@
 
 s3 is a Scheme compiler, written in Scheme, and a virtual machine written in Rust. It implements [R7RS-small](https://standards.scheme.org/corrected-r7rs/r7rs.html), the current Scheme standard, with one deliberate omission: there are no complex numbers. Everything else in the standard is there: hygienic `syntax-rules` macros, libraries and `import`, exact rationals and arbitrary-size integers, full Unicode characters and strings, first-class continuations, `dynamic-wind`, exceptions, parameters, records, bytevectors, binary and textual ports, and proper tail calls.
 
-s3 compiles each top-level form to bytecode for a stack-based virtual machine, and runs it. Programs and libraries can also be compiled to files ahead of time. It is a learning project, continuing s2, whose compiler was in Rust, and the interpreter [s1](https://github.com/timbarnes/s1) before it. It is about five times faster than s1. The [comparison with other Schemes](design/07-comparison.md) shows where it stands.
+s3 compiles each top-level form to bytecode for a stack-based virtual machine, and runs it. Programs and libraries can also be compiled to files ahead of time. It is a learning project, continuing s2, whose compiler was in Rust, and the interpreter [s1](https://github.com/timbarnes/s1) before it. It is about ten times faster than s1, and a little faster than Gauche. The [comparison with other Schemes](design/07-comparison.md) shows where it stands.
 
 These pages are a quick guide. Each one summarizes what a part of the language does in s3 and notes where s3 makes a choice the standard leaves open. For the precise definition of any form or procedure, follow the links to the R7RS report:
 

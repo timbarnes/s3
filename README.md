@@ -52,13 +52,13 @@ target/release/s3 -e '(+ 1 2)'         # evaluate an expression
 
 ## Speed
 
-s3 is about 6 times faster than s1. Against established Schemes, measured
+s3 is about 10 times faster than s1. Against established Schemes, measured
 on ecraven's r7rs-benchmarks, it is:
 
-- 3.6 times faster than chibi;
-- two-thirds the speed of Gauche;
-- a fifth of Guile's speed;
-- a ninth to a fifteenth of the speed of the native-code compilers.
+- 6 times faster than chibi;
+- 1.13 times faster than Gauche;
+- half the speed of Chicken and s7, a third of Guile's;
+- a fifth to a ninth of the speed of the native-code compilers.
 
 [plan/07-comparison.md](plan/07-comparison.md) has the details.
 

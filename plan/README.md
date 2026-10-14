@@ -45,7 +45,7 @@ in `docs/`).
 | [04-roadmap.md](04-roadmap.md) | The incremental phases, each with goals, what it teaches, decisions, exit tests and benchmarks |
 | [05-testing.md](05-testing.md) | How each phase is verified: differential testing against s1, golden disassembly, GC stress, conformance, benchmarks |
 | [06-directions.md](06-directions.md) | Written after P10: the compiler in Scheme here or in a fork, a reduced runtime, comparing with other Schemes, embedded targets, native code |
-| [07-comparison.md](07-comparison.md) | P12: s2 against eight other Schemes and s1, in architecture, completeness, features and performance |
+| [07-comparison.md](07-comparison.md) | P12, updated for s3: s3 against s2, s1 and eight other Schemes, in architecture, completeness, features and performance |
 | [08-compiler-in-scheme.md](08-compiler-in-scheme.md) | The plan for P13: the decisions to settle, sub-phases P13.0-P13.6 and their exit tests, and the risks |
 | [09-s3.md](09-s3.md) | s3: S0 removes the Rust compiler, commits the boot images and adds a verifier; what follows |
 
