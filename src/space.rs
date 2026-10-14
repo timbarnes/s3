@@ -16,6 +16,9 @@
 //! - **A collection** clears every mark bit, marks what it reaches, then
 //!   rebuilds the free lists from the unmarked slots. These objects own
 //!   nothing, so nothing is dropped.
+//! - **Empty pages are given back** after a collection, except as many as
+//!   the size class needs for as many allocations as it had in the last
+//!   cycle (plan/11, G3).
 //!
 //! Nothing here moves, like every other object (`heap.rs`).
 
@@ -111,6 +114,10 @@ fn set(h: &mut [u64; WORDS], i: usize) {
     h[i / 64] |= 1 << (i % 64);
 }
 
+fn page_layout() -> Layout {
+    Layout::from_size_align(PAGE_BYTES, PAGE_BYTES).unwrap()
+}
+
 /// A page of `bytes`, aligned to 64KB, its header zeroed.
 fn new_page(bytes: usize, units: usize) -> NonNull<Header> {
     let layout = Layout::from_size_align(bytes, PAGE_BYTES).unwrap();
@@ -152,11 +159,13 @@ struct Space {
     free: *mut u64,
     /// Objects in use: allocated since the last collection, or alive at it.
     count: usize,
+    /// Objects alive at the last collection.
+    live: usize,
 }
 
 impl Space {
     fn new(units: usize, pairs: bool) -> Space {
-        Space { units, pairs, pages: Vec::new(), free: ptr::null_mut(), count: 0 }
+        Space { units, pairs, pages: Vec::new(), free: ptr::null_mut(), count: 0, live: 0 }
     }
 
     #[inline]
@@ -200,6 +209,27 @@ impl Space {
             }
         }
         let slots = (UNITS - FIRST) / self.units;
+        // Give back empty pages, keeping enough free slots for as many
+        // allocations as the last cycle made. Never in poison mode, which
+        // keeps what it poisons.
+        if !poison {
+            // A mark bit is set only at an object's first unit.
+            // SAFETY: a page's header.
+            let marked = |page: &NonNull<Header>| unsafe { (*page.as_ptr()).mark.iter().map(|w| w.count_ones() as usize).sum::<usize>() };
+            let live: usize = self.pages.iter().map(marked).sum();
+            let needed = self.count - self.live;
+            let mut spare = self.pages.len() * slots - live;
+            self.pages.retain(|page| {
+                if spare < needed + slots || marked(page) > 0 {
+                    return true;
+                }
+                spare -= slots;
+                // SAFETY: allocated in `grow` with this layout; nothing in
+                // it is alive, and the free list is rebuilt below.
+                unsafe { dealloc(page.as_ptr().cast(), page_layout()) };
+                false
+            });
+        }
         let mut free = ptr::null_mut();
         let mut live = 0;
         for &page in self.pages.iter().rev() {
@@ -224,6 +254,7 @@ impl Space {
         }
         self.free = free;
         self.count = live;
+        self.live = live;
     }
 }
 
@@ -283,6 +314,10 @@ impl Small {
         }
     }
 
+    fn page_count(&self) -> usize {
+        self.pairs.pages.len() + self.headed.iter().map(|s| s.pages.len()).sum::<usize>()
+    }
+
     /// Objects in use.
     pub fn count(&self) -> usize {
         self.pairs.count + self.headed.iter().map(|s| s.count).sum::<usize>() + self.large_count
@@ -308,8 +343,19 @@ impl Small {
     /// Free everything the collection didn't mark, or in poison mode fill
     /// it with `freed` (the symbol `<<FREED>>`) and never reuse it.
     pub fn sweep(&mut self, poison: bool, freed: Value) {
+        let before = self.page_count();
         self.pairs.sweep(poison, freed);
         self.headed.iter_mut().for_each(|s| s.sweep(poison, freed));
+        if self.page_count() < before {
+            // mimalloc keeps freed pages for reuse; this hands them back to
+            // the system (on macOS, a 665MB footprint fell to 13MB), for
+            // about 1% on programs that churn through pages.
+            unsafe extern "C" {
+                fn mi_collect(force: bool);
+            }
+            // SAFETY: mimalloc's, linked as the global allocator.
+            unsafe { mi_collect(true) };
+        }
         let mut live = 0;
         self.large.retain(|&page| {
             // SAFETY: a large page's header, its object at FIRST.
@@ -339,7 +385,7 @@ impl Drop for Small {
         let spaces = std::iter::once(&self.pairs).chain(&self.headed);
         for &page in spaces.flat_map(|s| &s.pages) {
             // SAFETY: allocated in `grow` with this layout.
-            unsafe { dealloc(page.as_ptr().cast(), Layout::from_size_align(PAGE_BYTES, PAGE_BYTES).unwrap()) };
+            unsafe { dealloc(page.as_ptr().cast(), page_layout()) };
         }
         for &page in &self.large {
             // SAFETY: allocated in `headed` with this layout.

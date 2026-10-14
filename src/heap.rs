@@ -143,13 +143,18 @@ pub enum Obj {
     Template(Box<Template>),
 }
 
-/// The minimum number of allocations between collections (s1's default).
-const GC_THRESHOLD: usize = 20_000;
+/// The minimum number of allocations between collections. 100,000 rather
+/// than s1's 20,000: a small heap was collected so often that re-marking
+/// what the system itself holds showed (deriv 1.11x, paraffins and guard
+/// 1.09x), for a peak a few MB larger (plan/11, G3).
+pub(crate) const GC_THRESHOLD: usize = 100_000;
 
 /// How many allocations, per object that survived the last collection,
 /// come before the next one. 2 rather than 1: a program with a large live
 /// heap re-marks it half as often (`gcbench` 1.33x, `mperm` 1.12x), for a
-/// peak heap up to about 1.4 times larger (plan/09).
+/// peak heap up to about 1.4 times larger (plan/09). Measured again with
+/// compact objects: 1 saves a fifth to a half of the peak, and is 5-27%
+/// slower (plan/11, G3).
 const GC_GROWTH: usize = 2;
 
 /// Owns every heap object.
@@ -290,6 +295,7 @@ impl Heap {
     #[cfg(feature = "gcstats")]
     pub fn report_gc_stats(&self) {
         self.gc_stats.report(self.collections, self.marked, std::mem::size_of::<GcObject>());
+        eprintln!("gc: compact pages at exit {:.1}MB", self.small.bytes() as f64 / (1 << 20) as f64);
     }
 
     /// Write out every file output port's buffer: before the process
@@ -776,6 +782,14 @@ mod tests {
         if !heap.poison {
             assert_eq!((churn(&mut heap), churn(&mut heap)), (bytes, bytes));
         }
+        // Empty pages are given back once a cycle allocates less.
+        for i in 0..100_000 {
+            heap.cons(Value::fixnum(i).unwrap(), Value::NIL);
+        }
+        heap.collect([kept]);
+        let full = heap.small.bytes();
+        heap.collect([kept]);
+        assert!(heap.poison || heap.small.bytes() < full / 10, "{} of {} bytes kept", heap.small.bytes(), full);
         // Records of every size class, and one too large for any, which has
         // a page of its own: kept while reachable, freed when not.
         let rtype = heap.record_type(sym, vec![]).as_ref().unwrap();

@@ -1189,14 +1189,15 @@ mod tests {
         );
         assert_eq!(printer::print_value(last), "done");
         // Two million pairs were made; the heap never held more than one
-        // collection interval's worth.
-        assert!(s.heap.collections > 50, "{} collections", s.heap.collections);
-        assert!(s.heap.len() < 25_000, "{} objects", s.heap.len());
+        // collection interval's worth, besides what startup made.
+        let interval = heap::GC_THRESHOLD;
+        assert!(s.heap.collections > 2_000_000 / interval / 2, "{} collections", s.heap.collections);
+        assert!(s.heap.len() < interval + 25_000, "{} objects", s.heap.len());
     }
 
     #[test]
     fn deep_recursion_collects_in_linear_time() {
-        // Each of the 100,000 frames keeps a pair alive in a `let` slot, so
+        // Each of the 500,000 frames keeps a pair alive in a `let` slot, so
         // the live heap grows throughout. Marking work stays within a small
         // multiple of the allocation; a fixed collection interval would
         // re-mark the growing heap every interval (3n here, quadratic in
@@ -1204,7 +1205,7 @@ mod tests {
         //
         // Every collection also marks what was live at startup, which is
         // larger with the compiler in Scheme loaded; that part is left out.
-        let n = 100_000;
+        let n = 5 * heap::GC_THRESHOLD as i64;
         let startup = Session::new().heap.object_count();
         let (s, last) = session_after(&format!(
             "(define (deep n) (let ((p (cons n '()))) (if (= n 0) 0 (+ (car p) (deep (- n 1)) (- 0 (car p)) 1)))) (deep {})",
@@ -1213,7 +1214,7 @@ mod tests {
         assert_eq!(last.as_fixnum(), Some(n));
         assert!(s.heap.collections >= 2, "{} collections", s.heap.collections);
         let program = s.heap.marked.saturating_sub(s.heap.collections * startup);
-        assert!(program < 2 * n as usize + 20_000, "{} marked, {} of them for the program", s.heap.marked, program);
+        assert!(program < 2 * n as usize + heap::GC_THRESHOLD, "{} marked, {} of them for the program", s.heap.marked, program);
     }
 
     /// s1's `scheme/tail_tests.scm`: a loop

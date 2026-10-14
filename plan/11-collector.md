@@ -328,6 +328,73 @@ native code replaces.
 
 - **Exit:** peak RSS and cycles against G2.
 
+### G3 results (2026-10-14)
+
+**`GC_THRESHOLD` is now 100,000.** Measured at 20,000, 100,000, 250,000
+and 1,000,000, against G2, in cycles:
+
+- **Gains at 100,000** were in the programs with a small heap: deriv
+  1.11x, paraffins and guard 1.09x, divrec and primes 1.08x, listmap
+  1.06x.
+- **Higher values** gained little more, and peak RSS grew: those
+  programs went from 5-6MB to 6-10MB at 100,000, and 21-57MB at
+  1,000,000.
+
+Two tests assumed 20,000: the allocating loop's collection count, and
+the deep recursion, which collected only once at 100,000. Both are now
+written in terms of `GC_THRESHOLD`, and the recursion is five times
+it.
+
+**`GC_GROWTH` stays 2.** At 1, the peak falls by a fifth to a half
+(earley 2457 to 1970MB, nboyer 557 to 375MB, gcbench 304 to 152MB), but
+earley is 10% slower, mperm 4%, paraffins 27%. 1.5 was mixed.
+
+**Empty pages are given back** (`Space::sweep`). Each size class keeps
+enough free slots for as many allocations as it made in the last
+cycle, and frees the empty pages beyond that. Poison mode keeps
+everything. Freeing pages wasn't enough on its own: mimalloc keeps them
+for reuse. A forced `mi_collect` after any sweep that freed pages hands
+them back.
+
+A test program that builds a 20-million-element list, drops it, then
+runs a loop:
+
+| | physical footprint in the loop (`vmmap`) |
+|---|---:|
+| G2 | 664MB |
+| pages freed, without `mi_collect` | 665MB |
+| pages freed, with `mi_collect` | 13MB |
+
+`ps` and `/usr/bin/time` showed 665MB in every case: on macOS, RSS
+still counts pages handed back as reusable until something else needs
+them. The physical footprint is the measure to use. `mi_collect` costs
+about 1% on programs that churn pages: deriv 0.99x, mperm 0.985x,
+gcbench 1.01x. Obj slot pages (`Slots`) are still never given back,
+but they now hold only symbols, strings, vectors and the like.
+`--features gcstats` now also prints the compact pages left at exit.
+
+Tests: all 109 pass in release, in debug, and with stress and poison
+together. chibi's suite gives 1154.
+
+**Cycles, against G2** (median of 3, higher is faster): paraffins 1.14,
+divrec 1.10, deriv 1.07, listmap and guard 1.07, primes 1.06, browse
+and cpstak 1.05, earley 1.04, destruc 1.02, program 1.03. The rest are
+0.98-1.02 (tail 0.977, the lowest). The geometric mean over 28 is
+1.02x.
+
+**Peak RSS** at the settings chosen: earley 2457MB, mperm 892MB,
+nboyer 557MB, paraffins 824MB, gcbench 304MB. gcbench was 184MB under
+G2: at this threshold, a collection happens to fall later in its
+build-and-drop cycle. That is the one program whose peak grew.
+
+**Where G1-G3 leave s3**, against G0's binary: peak memory 2.4-5.4
+times lower on the large programs, and about 1.05x faster overall,
+taking the three geometric means together (1.04 × 0.99 × 1.02). Call-
+bound programs are slower than at G0 (fib 0.95x, tak 0.91x), and the
+programs that allocate are faster (earley 1.39x, paraffins 1.30x, deriv
+1.18x, mperm 1.14x). These ratios combine runs from different sessions,
+so they are less exact than each phase's own comparison.
+
 ### G4. A generational collector (deferred)
 
 This is worth building only if, after G1-G3, collection time is still a
