@@ -19,6 +19,7 @@
              (loop (cdr parts) (cons (number->string (car parts)) names)))
             (else (fail (string-append who ": not a library name: " (show datum))))))))
 
+;; A library name, (part ...), as text for messages.
 (define (format-library-name names) (string-append "(" (join names " ") ")"))
 
 ;; The exports of the library `names`, loading its file first if it has
@@ -83,6 +84,9 @@
 
 ;;; define-library declarations
 
+;; What a define-library's declarations amount to, once collected: its
+;; exports, its import sets, and its body, the forms of its begins and
+;; includes in order.
 (define-record-type declarations
   (make-declarations exports imports body)
   declarations?

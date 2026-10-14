@@ -13,6 +13,10 @@
 ;;; and %make-template turns them into a template. A jump is emitted with
 ;;; target 0 and patched when the target is known.
 
+;; The state of compiling one procedure (one template): the code and
+;; constants emitted so far, the stack depth, and where each variable
+;; lives. An inner lambda gets a new gen (lambda-template) that shares
+;; `boxed` and `frees` with its parent.
 (define-record-type gen
   (make-gen boxed frees code consts const-index depth locs names local-names free-names self-var next-self params)
   gen?
@@ -40,6 +44,8 @@
   (next-self gen-next-self set-gen-next-self!)
   (params gen-params set-gen-params!))
 
+;; A gen for a new procedure, sharing the form's boxed variables and
+;; free-variable memo; everything else starts empty.
 (define (new-gen boxed frees)
   (make-gen boxed frees (make-buffer) (make-buffer) '() 0 '() '() (make-buffer) (make-buffer) #f #f 0))
 
@@ -50,6 +56,9 @@
     (gen-expr g e #t)
     (finish g "top-level" 0 #f)))
 
+;; The template for what `g` has compiled: its code, constants, the names
+;; of its slots (several names, joined by /, where sibling lets reuse a
+;; slot) and of its free variables, for the disassembler and backtraces.
 (define (finish g name required rest?)
   (let ((slot-names (map (lambda (names)
                            (if (null? names)
@@ -63,6 +72,9 @@
                     (list->vector slot-names)
                     (buffer->vector (gen-free-names g)))))
 
+;; Record that the code just emitted pushed `n` values (popped, if
+;; negative). Every emit is followed by one, so the depth is always the
+;; number of values in the frame, which is how a let finds its slots.
 (define (depth+! g n) (set-gen-depth! g (+ (gen-depth g) n)))
 
 ;; The pool index of `v`, adding it if it isn't there. Constants are
@@ -83,10 +95,14 @@
 ;; Return the value just pushed, if in tail position.
 (define (ret g tail?) (if tail? (emit g 'return)))
 
+;; Whether variable `id` lives in a box (boxed-variables, analyze.scm);
+;; where it lives, (local . slot) or (free . index); and its name.
 (define (boxed? g id) (memv id (gen-boxed g)))
 (define (loc g id) (cdr (assv id (gen-locs g))))
 (define (name-of g id) (cdr (assv id (gen-names g))))
 
+;; Make `var` local `slot` of the procedure being compiled, and add its
+;; name to the slot's names.
 (define (bind-local g var slot)
   (let ((name (identifier-name (var-name var)))
         (slots (gen-local-names g)))
@@ -107,6 +123,7 @@
     (if (eq? (car l) 'local) (emit g 'local-ref (cdr l)) (emit g 'free-ref (cdr l))))
   (depth+! g 1))
 
+;; Box `var`, just bound in `slot`, if it needs a box.
 (define (box-if-needed g var slot)
   (if (boxed? g (var-id var)) (emit g 'make-box slot)))
 
@@ -122,11 +139,15 @@
              (emit g 'local-set (cdr (loc g id)))
              (depth+! g -1))))
 
+;; Push the unspecified value: the result of set! and similar forms.
 (define (unspecified g tail?)
   (emit g 'unspecified)
   (depth+! g 1)
   (ret g tail?))
 
+;; Compile the expression `e`: code that leaves its value on the stack,
+;; or, if `tail?`, returns it (a call in tail position becomes a tail
+;; call). The heart of codegen: a post-order walk, one case per node.
 (define (gen-expr g e tail?)
   (case (node-tag e)
     ((const) (constant-op g (const-value e)) (depth+! g 1) (ret g tail?))
@@ -195,6 +216,10 @@
          (if group? (patch-group g bindings)))
        (end-scope g (let-body e) tail? (length bindings))))))
 
+;; Compile an if. The test, if it is an inlined predicate or comparison,
+;; is fused with its jump (jump-if-not, or jump-if-not-imm against a small
+;; constant); (if (not x) a b) becomes (if x b a). In tail position each
+;; branch returns, so no jump is needed over the else.
 (define (if-expr g e tail?)
   ;; (if (not x) a b) is (if x b a).
   (let loop ((test (if-test e)) (then (if-then e)) (els (if-else e)))
@@ -235,6 +260,10 @@
                 (gen-expr g els #f)
                 (patch g to-end)))))))
 
+;; Compile a call: a self-tail-call for a loop (a lambda-group procedure
+;; calling itself in tail position), one instruction for an inlined
+;; primitive (car, +, vector-ref ...: inlinable), else the procedure and
+;; arguments followed by call or tail-call.
 (define (call-expr g e tail?)
   (let* ((f (call-fn e)) (args (call-args e)) (n (length args)))
     (cond
@@ -262,6 +291,8 @@
 ;; Whether `v` is an exact integer from `lo` to `hi`.
 (define (small? v lo hi) (and (exact-integer? v) (<= lo v hi)))
 
+;; The value of `e` if it is a constant that fits an instruction's
+;; 32-bit immediate (add-imm, sub-imm), else #f.
 (define (small-constant e)
   (and (eq? (node-tag e) 'const)
        (small? (const-value e) -2147483648 2147483647)
@@ -305,12 +336,15 @@
               (t (and op (test-of (car op)))))
          (and t (cons t (call-args test))))))
 
+;; The test, as jump-if-not names it, of the inlined instruction `name`,
+;; or #f if it isn't a predicate or comparison.
 (define (test-of name)
   (case name
     ((null?) 'null?) ((pair?) 'pair?) ((eq?) 'eq?)
     ((num-eq) '=) ((lt) '<) ((gt) '>) ((le) '<=) ((ge) '>=)
     (else #f)))
 
+;; How many arguments test `t` takes.
 (define (test-arity t) (if (memq t '(null? pair?)) 1 2))
 
 ;; After a lambda group's closures are made, in order: each one that

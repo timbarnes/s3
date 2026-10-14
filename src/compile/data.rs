@@ -20,7 +20,6 @@
 //! (`vm/verify.rs`) checks first.
 
 use crate::builtins::{Error, Primitive, err, kind, prim};
-use crate::compile::ast::{Expr, Lambda, Var};
 use crate::compile::syntax_rules::name as id_name;
 use crate::globals::{TopBinding, cell_name, cell_value, env_of};
 use crate::heap::{GcRef, Heap, Obj, list_to_vec};
@@ -31,79 +30,13 @@ use crate::vm::verify::verify;
 use crate::vm::{Op, Template};
 
 // ---------------------------------------------------------------------------
-// The AST
-
-/// The fields of the node `d`, after its tag, and the tag.
-fn node(d: Value) -> Result<(&'static str, Vec<Value>), String> {
-    let bad = || format!("not an AST node: {}", print_value(d));
-    let Some(Obj::Vector(items)) = kind(d) else { return Err(bad()) };
-    let items: Vec<Value> = items.iter().map(|c| c.get()).collect();
-    let tag = items.first().and_then(|t| t.as_ref()).filter(|t| matches!(t.get().kind, Obj::Symbol(_))).ok_or_else(bad)?;
-    // Symbols are never freed while a datum refers to them, and the tag's
-    // name is only compared, not kept.
-    let name: &'static str = id_name(tag);
-    Ok((name, items[1..].to_vec()))
-}
-
-fn var_id(v: Value) -> Result<u32, String> {
-    v.as_fixnum().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| format!("not a variable number: {}", print_value(v)))
-}
+// Global cells
 
 fn cell(v: Value) -> Result<GcRef, String> {
     match kind(v) {
         Some(Obj::Global { .. }) => Ok(v.as_ref().unwrap()),
         _ => Err(format!("not a global variable's cell: {}", print_value(v))),
     }
-}
-
-fn datum_to_var(d: Value) -> Result<Var, String> {
-    match node(d)? {
-        ("var", f) if f.len() == 2 => Ok(Var { id: var_id(f[0])?, name: f[1] }),
-        _ => Err(format!("not a variable: {}", print_value(d))),
-    }
-}
-
-fn items(d: Value) -> Result<Vec<Value>, String> {
-    list_to_vec(d).ok_or_else(|| format!("not a list: {}", print_value(d)))
-}
-
-fn datum_to_bindings(d: Value) -> Result<Vec<(Var, Expr)>, String> {
-    items(d)?
-        .into_iter()
-        .map(|pair| match kind(pair) {
-            Some(Obj::Pair { car, cdr }) => Ok((datum_to_var(car.get())?, datum_to_expr(cdr.get())?)),
-            _ => Err(format!("not a binding: {}", print_value(pair))),
-        })
-        .collect()
-}
-
-/// The AST that the tagged vectors `d` stand for.
-pub fn datum_to_expr(d: Value) -> Result<Expr, String> {
-    let sub = |x: Value| datum_to_expr(x).map(Box::new);
-    let (tag, f) = node(d)?;
-    Ok(match (tag, f.as_slice()) {
-        ("const", &[v]) => Expr::Const(v),
-        ("local-ref", &[v]) => Expr::LocalRef(var_id(v)?),
-        ("local-set", &[v, x]) => Expr::LocalSet(var_id(v)?, sub(x)?),
-        ("global-ref", &[c]) => Expr::GlobalRef(cell(c)?),
-        ("global-set", &[c, x]) => Expr::GlobalSet(cell(c)?, sub(x)?),
-        ("global-define", &[c, x]) => Expr::GlobalDefine(cell(c)?, sub(x)?),
-        ("if", &[a, b, c]) => Expr::If(sub(a)?, sub(b)?, sub(c)?),
-        ("seq", &[xs]) => Expr::Seq(items(xs)?.into_iter().map(datum_to_expr).collect::<Result<_, _>>()?),
-        ("call", &[f, args]) => Expr::Call(sub(f)?, items(args)?.into_iter().map(datum_to_expr).collect::<Result<_, _>>()?),
-        ("lambda", &[name, params, rest, body]) => {
-            let Some(Obj::Str(name)) = kind(name) else { return Err(format!("not a procedure name: {}", print_value(name))) };
-            Expr::Lambda(Box::new(Lambda {
-                name: name.borrow().to_string().into(),
-                params: items(params)?.into_iter().map(datum_to_var).collect::<Result<_, _>>()?,
-                rest: if rest.is_true() { Some(datum_to_var(rest)?) } else { None },
-                body: datum_to_expr(body)?,
-            }))
-        }
-        ("let", &[bindings, body]) => Expr::Let(datum_to_bindings(bindings)?, sub(body)?),
-        ("letrec", &[bindings, body]) => Expr::Letrec(datum_to_bindings(bindings)?, sub(body)?),
-        _ => return Err(format!("not an AST node: {}", print_value(d))),
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -342,13 +275,6 @@ pub static PRIMITIVES: &[Primitive] = &[
     prim("%template->procedure", 1, Some(1), |h, a| match kind(a[0]) {
         Some(Obj::Template(_)) => Ok(h.closure(a[0].as_ref().unwrap(), std::iter::empty())),
         _ => Err(err!("%template->procedure: not a template: {}", print_value(a[0]))),
-    }),
-    // The inverse, for checking: (%template-instructions t) is t's code as data.
-    prim("%template-instructions", 1, Some(1), |h, a| {
-        let Some(Obj::Template(t)) = kind(a[0]) else { return Err(err!("%template-instructions: not a template: {}", print_value(a[0]))) };
-        let code: Vec<Op> = t.code.clone();
-        let items = code.into_iter().map(|op| op_to_datum(h, op)).collect();
-        Ok(h.list(items))
     }),
 ];
 

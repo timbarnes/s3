@@ -12,6 +12,9 @@
 ;;; Hygiene is by renaming (syntax-rules.scm): an alias bound nowhere means
 ;;; what its original means in the macro's definition scope.
 
+;; The state of expanding one top-level form: the environment it is for,
+;; the scope frames of the binding forms it is inside, the counter that
+;; numbers its local variables, and the macros it has defined.
 (define-record-type expander
   (make-expander env frames nframes next-id nesting macros)
   expander?
@@ -37,6 +40,8 @@
 (define (expand form env)
   (expr (make-expander env '() 0 0 0 '()) form #t))
 
+;; Enter a new scope with `bindings`, ((id . binding) ...), on entering a
+;; binding form's body, and leave it again.
 (define (push-frame! x bindings)
   (let ((outer (if (null? (expander-frames x)) '() (vector-ref (car (expander-frames x)) 0))))
     (set-expander-frames! x (cons (vector (append bindings outer) outer) (expander-frames x))))
@@ -53,6 +58,8 @@
 
 ;;; Resolving identifiers
 
+;; What identifier `id` means here: (local . number), (core . name),
+;; (macro . m), or (global name . env). See resolve-in.
 (define (resolve x id) (resolve-in x id (expander-nframes x) (expander-env x)))
 
 ;; What `id` means in the scope of the outermost `depth` frames over the
@@ -89,6 +96,7 @@
 (define (head-binding x form)
   (and (pair? form) (identifier? (car form)) (resolve x (car form))))
 
+;; The core form, or the macro, that `form`'s head names, or #f.
 (define (head-core x form)
   (let ((b (head-binding x form))) (and b (eq? (car b) 'core) (cdr b))))
 
@@ -97,6 +105,10 @@
 
 ;;; Macro uses
 
+;; One step of expanding the use `form` of the macro `m`: the first rule
+;; whose pattern matches it, instantiated. A literal in a pattern matches
+;; an input that means the same thing: the literal as the macro's
+;; definition scope sees it, the input as the use's scope does.
 (define (expand-macro x m form)
   (let* ((sr (macro->transformer m))
          (depth (transformer-depth sr))
@@ -123,18 +135,22 @@
     (pop-frame! x)
     result))
 
+;; The items of a form, which must be a proper list.
 (define (items-of form)
   (if (list? form) form (fail (string-append "improper list in code: " (show form)))))
 
+;; Fail with "keyword: bad syntax: (form)".
 (define (syntax-error keyword items)
   (fail (string-append keyword ": bad syntax: (" (join (map show items) " ") ")")))
 
+;; `strings` joined with `sep` between them.
 (define (join strings sep)
   (if (null? strings)
       ""
       (let loop ((rest (cdr strings)) (text (car strings)))
         (if (null? rest) text (loop (cdr rest) (string-append text sep (car rest)))))))
 
+;; The node of an expression whose value is unspecified.
 (define unspecified-node (vector 'const (if #f #f)))
 
 ;;; Expressions
@@ -159,6 +175,8 @@
         ;; Numbers, strings, vectors and so on evaluate to themselves.
         (else (vector 'const (%strip-datum form)))))
 
+;; A reference to the variable `id`: local-ref or global-ref, or an error
+;; if `id` names syntax.
 (define (variable x id)
   (let ((b (resolve x id)))
     (case (car b)
@@ -166,6 +184,8 @@
       ((global) (vector 'global-ref (%env-cell (cddr b) (cadr b))))
       (else (fail (string-append (show id) ": syntax used as a variable"))))))
 
+;; Expand a use of the core form `c` (quote, lambda, define, if, let ...,
+;; and the derived forms in derived.scm): the dispatch on its keyword.
 (define (core x c form top?)
   (let* ((items (items-of form))
          (keyword (id-name (car items)))
@@ -219,10 +239,12 @@
       ;; Auxiliary syntax: else, =>, _ and ...
       (else (fail (string-append keyword ": auxiliary syntax can't be used as an expression"))))))
 
+;; (if test then) or (if test then else).
 (define (if-form x items)
   (let ((n (length items)))
     (if (not (or (= n 3) (= n 4))) (syntax-error "if" items))
-    ;; The else branch first, as the Rust expander does.
+    ;; The else branch first, as the Rust expander did: that order
+    ;; numbers the variables, and the golden listings show it.
     (let* ((els (if (= n 4) (expr x (cadddr items) #f) unspecified-node))
            (test (expr x (cadr items) #f))
            (then (expr x (caddr items) #f)))
@@ -239,6 +261,7 @@
          (cons (cadr items) (cons 'expr (caddr items))))
         (else #f)))
 
+;; The parts of a define form, or a syntax error.
 (define (definition items)
   (or (definition-parts items) (syntax-error "define" items)))
 
@@ -278,6 +301,8 @@
               (vector-set! value 1 text))
           value))))
 
+;; (set! name value): a local-set or a global-set, or an error if `name`
+;; is syntax or an import, which can't be assigned.
 (define (set-form x items)
   (if (not (and (= (length items) 3) (identifier? (cadr items))))
       (syntax-error "set!" items))
@@ -289,6 +314,8 @@
       ((global) (vector 'global-set (%env-set-cell (cddr b) (cadr b)) value))
       (else (fail (string-append "set!: can't assign to syntax: " (show name)))))))
 
+;; (begin form ...): at top level, its forms are top-level forms in turn,
+;; so they can define; elsewhere, an expression sequence.
 (define (begin-form x items top?)
   (cond ((and (= (length items) 1) top?)
          ;; (begin) is only legal at top level.
@@ -357,6 +384,8 @@
                     (body (sequence x (cons form (cdr pending)) #f)))
                (if (null? bindings) body (vector 'letrec bindings body)))))))))
 
+;; Fail if `name` is already defined in the innermost frame: a body that
+;; defines the same name twice.
 (define (check-unbound-in-frame x name)
   (let ((frame (car (expander-frames x))))
     (let loop ((bs (vector-ref frame 0)))
@@ -461,6 +490,7 @@
               (fail (string-append who ": duplicate variable: " (show (car spec)))))
           (loop (cdr specs) (cons (cons (car spec) (cadr spec)) out))))))
 
+;; A procedure call: the operator and the arguments, expanded in order.
 (define (call x form)
   (let* ((items (items-of form))
          (f (expr x (car items) #f)))
@@ -469,6 +499,8 @@
 ;;; Quasiquote: the template as calls to cons, append and list->vector.
 ;;; Parts with no unquote in them are constants.
 
+;; Expand the quasiquote template `template`, nested `depth` quasiquotes
+;; deep: unquote at depth 1 is an expression, deeper ones stay data.
 (define (quasi x template depth)
   (if (not (has-unquote? x template))
       (vector 'const (%strip-datum template))
@@ -513,6 +545,7 @@
                 (memq (cdr b) '(unquote unquote-splicing quasiquote))
                 (cons (cdr b) (cadr (car parts))))))))
 
+;; Whether `form` has an unquote or unquote-splicing anywhere in it.
 (define (has-unquote? x form)
   (cond ((pair? form)
          (let ((u (unquote-form x form)))
@@ -578,4 +611,6 @@
                                                                (vector 'const exports)
                                                                (vector 'const lib))))))))))))
 
+;; Whether two imported bindings are the same: an import of one name twice
+;; is only an error if they differ.
 (define (same-import? a b) (and (eq? (car a) (car b)) (eq? (cdr a) (cdr b))))

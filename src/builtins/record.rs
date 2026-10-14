@@ -18,18 +18,9 @@ pub static PRIMITIVES: &[Primitive] = &[
     prim("%record?", 2, Some(2), |_, a| {
         Ok(Value::bool(matches!(kind(a[0]), Some(Obj::Record { rtype, .. }) if Value::obj(*rtype).eq(a[1]))))
     }),
-    prim("%record-get", 3, Some(3), |_, a| {
-        let i = field_index(a[1], a[2], "record accessor")?;
-        Ok(record_fields(a[0], a[1], "record accessor")?[i].get())
-    }),
     prim("%record-index", 2, Some(2), |_, a| Ok(super::fixnum(field_index(a[0], a[1], "define-record-type")?))),
     prim("%record-ref", 3, Some(3), record_ref),
     prim("%record-set-index!", 4, Some(4), record_set_index),
-    prim("%record-set!", 4, Some(4), |_, a| {
-        let i = field_index(a[1], a[2], "record modifier")?;
-        record_fields(a[0], a[1], "record modifier")?[i].set(a[3]);
-        Ok(Value::UNSPECIFIED)
-    }),
 ];
 
 /// The field `args[2]` (an index from `%record-index`) of the record

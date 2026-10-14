@@ -5,6 +5,8 @@
 ;;; library whose file isn't loaded loads it there and then
 ;;; (find-library).
 
+;; Compile one top-level form for the environment `env`: expand it to the
+;; core AST, then generate its template.
 (define (compile form env) (codegen (expand form env)))
 
 ;; A program's forms (R7RS 5.1), expanded in order as one body, so that
@@ -20,6 +22,8 @@
                               forms)))
     (inline-body x nodes (expander-macros x) env)))
 
+;; Whether `form` is a define-library (compile_file in Rust decides the
+;; same way).
 (define (library-form? form) (and (pair? form) (eq? (car form) 'define-library)))
 
 ;; eval (R7RS 6.12). The compiled form is called in tail position, so a

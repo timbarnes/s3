@@ -11,6 +11,8 @@
 ;;; are compared as a macro's were. A use that fits none of a macro's rules
 ;;; gets the macro's error.
 
+;; The error a use fitting none of a derived form's rules gets, as the
+;; syntax-rules macro it replaced gave.
 (define (no-rule-matches form)
   (fail (string-append "no syntax rule matches " (show form))))
 
@@ -23,6 +25,7 @@
 (define (literal-is? x literal id)
   (and (identifier? id) (same-binding? literal (resolve x id))))
 
+;; A reference to the variable `var`.
 (define (local-node var) (vector 'local-ref (var-id var)))
 
 ;; (if #f #f), which the macros used for an unspecified value.
@@ -189,6 +192,7 @@
 ;; code from the macro's (S1 step 3), not the result.
 (define max-eq-atoms 3)
 
+;; The test of a case clause: whether the key is one of `atoms`.
 (define (atoms-test atoms key-node memv-cell eq-cell)
   (define (eq-test atom) (vector 'call (vector 'global-ref eq-cell) (list (key-node) (vector 'const atom))))
   (if (and (pair? atoms) (<= (length atoms) max-eq-atoms) (every? eq-comparable? atoms))
@@ -198,6 +202,8 @@
             (vector 'if (eq-test (car atoms)) (vector 'const #t) (loop (cdr atoms)))))
       (vector 'call (vector 'global-ref memv-cell) (list (key-node) (vector 'const atoms)))))
 
+;; Whether eq? on `a` is the same as eqv?: a symbol, boolean, character,
+;; (), or a fixnum.
 (define (eq-comparable? a)
   (or (symbol? a) (boolean? a) (char? a) (null? a)
       (and (exact-integer? a) (<= -140737488355328 a 140737488355327))))

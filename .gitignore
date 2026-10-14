@@ -4,3 +4,4 @@ tests/r7rs/last-run.log
 *.s3o
 site/
 !boot/*.s3o
+tests/test-output-temp.txt

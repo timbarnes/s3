@@ -25,6 +25,8 @@
                 (vector-set! memo 0 (cons (cons l free) (vector-ref memo 0)))
                 free))))
 
+;; free-variables without the memo: walk `l`'s body, collecting the
+;; variables referenced and those bound inside, and keep the first.
 (define (walk-free-variables l memo)
   (let ((bound (map var-id (lambda-vars l)))
         (refs '()))
@@ -112,6 +114,7 @@
     (let loop ((early early) (boxed assigned))
       (if (null? early) boxed (loop (cdr early) (add (car early) boxed))))))
 
+;; `ids` without `id`.
 (define (remove-id id ids)
   (cond ((null? ids) '())
         ((eqv? (car ids) id) (remove-id id (cdr ids)))

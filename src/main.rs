@@ -117,7 +117,7 @@ const COMPILER_FILES: &[&str] = &[
 /// `(s3 compiler)`'s source: a `define-library` around `COMPILER_FILES`.
 fn compiler_source() -> String {
     format!(
-        "(define-library (s3 compiler) (export expand expand-program codegen eval-form load-library dis-form) (import (scheme base) (scheme cxr) (scheme repl) (scheme write) (s3)) (begin {}))",
+        "(define-library (s3 compiler) (export expand expand-program show-ast codegen eval-form load-library dis-form) (import (scheme base) (scheme cxr) (scheme repl) (scheme write) (s3)) (begin {}))",
         COMPILER_FILES.join("\n")
     )
 }
@@ -323,7 +323,8 @@ impl Session {
     fn codegen(&mut self, ast: Value) -> Result<GcRef, String> {
         let (_, codegen) = self.scheme.unwrap();
         let compiled = if self.expand {
-            compile::data::datum_to_expr(ast).map(|e| io::write_stdout(&self.heap, &format!("{}\n", compile::ast::show(&e))))
+            let show = self.library_procedure(&["s3", "compiler"], "show-ast");
+            self.vm.call(&mut self.heap, show, &[ast]).map(|text| io::write_stdout(&self.heap, &format!("{}\n", printer::display_value(text))))
         } else {
             Ok(())
         }

@@ -9,8 +9,12 @@
 ;;; A macro is a Rust object (a parsed SyntaxRules), read and made through
 ;;; %macro-parts and %make-macro, so the two front ends share macros.
 
+;; Whether `v` is an identifier: a symbol, or an alias, the renamed
+;; identifier a macro expansion introduces (src/heap.rs, Obj::Alias).
 (define (identifier? v) (or (symbol? v) (%alias? v)))
 
+;; An alias's parts: the identifier it renames, and the scope it was
+;; renamed in, `depth` frames over the environment `env`.
 (define (alias-original a) (vector-ref (%alias-parts a) 0))
 (define (alias-depth a) (vector-ref (%alias-parts a) 1))
 (define (alias-env a) (vector-ref (%alias-parts a) 2))
@@ -33,6 +37,7 @@
 (define (sequence-parts v)
   (if (vector? v) (cons (vector->list v) '()) (list-parts v)))
 
+;; Fail the compile with the message `text`.
 (define (fail text) (error text))
 
 ;;; A transformer, as the matcher sees it.
@@ -47,11 +52,13 @@
   (depth transformer-depth)
   (env transformer-env))
 
+;; The macro `m`'s parts, as a record the matcher can use.
 (define (macro->transformer m)
   (let ((parts (%macro-parts m)))
     (make-transformer (vector-ref parts 0) (vector-ref parts 1) (vector-ref parts 2)
                       (vector-ref parts 3) (vector-ref parts 4))))
 
+;; Whether `id` is one of the macro's literals.
 (define (literal? sr id) (memq id (transformer-literals sr)))
 
 ;; Whether `v` is the ellipsis. Literals take priority. A custom ellipsis
@@ -63,8 +70,10 @@
            (eq? v (transformer-ellipsis sr))
            (eq? (strip v) '...))))
 
+;; Whether `id` is the pattern wildcard _ (unless it is a literal).
 (define (underscore? sr id) (and (not (literal? sr id)) (eq? (strip id) '_)))
 
+;; Whether `ok?` holds for some element of `items`.
 (define (any? ok? items)
   (and (pair? items) (or (ok? (car items)) (any? ok? (cdr items)))))
 
@@ -81,6 +90,7 @@
 ;;; Matching. Bindings are an association list from pattern variable to
 ;;; (one . form) or (many . (match ...)).
 
+;; The matcher for pattern `p` (see above).
 (define (compile-pattern sr p)
   (cond ((identifier? p)
          (cond ((literal? sr p) (vector 'lit p))
@@ -108,8 +118,11 @@
             (compile-pattern sr tail) (if repeated (pattern-vars sr repeated) '())
             (length before) (length after))))
 
+;; The first `n` elements of `items`.
 (define (take items n) (if (= n 0) '() (cons (car items) (take (cdr items) (- n 1)))))
 
+;; The position of the first element of `items` for which `ok?` holds, or
+;; #f.
 (define (index-where ok? items)
   (let loop ((items items) (i 0))
     (cond ((null? items) #f)
@@ -219,6 +232,8 @@
 ;;; `vars` are the rule's pattern variables. Inside (... template) the
 ;;; ellipsis is an ordinary identifier.
 
+;; The compiled form of template `t` (see above). `vars` are the pattern
+;; variables; `escaped?`, inside (... ...), where ellipses are ordinary.
 (define (compile-template sr t vars escaped?)
   (cond ((identifier? t) (if (memq t vars) (vector 'pvar t) (vector 'ident t)))
         ((pair? t)
@@ -259,6 +274,9 @@
 ;;; Instantiation: one fresh alias per distinct identifier the template
 ;;; introduces, per expansion.
 
+;; The expansion: the compiled `template` with the pattern variables'
+;; values from `binds`, and every other identifier renamed to a fresh
+;; alias, the same alias for the same identifier within one expansion.
 (define (instantiate sr template binds)
   (let ((renames '()))
     (define (rename id)
@@ -312,6 +330,8 @@
 ;;; Parsing: (syntax-rules [ellipsis] (literal ...) (pattern template) ...),
 ;;; defined in a scope of `depth` frames over `env`, checked, as a macro.
 
+;; The macro for the (syntax-rules ...) form `form`: its literals and
+;; rules checked, and their patterns and templates compiled.
 (define (parse-syntax-rules form depth env)
   (let ((parts (list-parts form)))
     (if (or (not (null? (cdr parts))) (< (length (car parts)) 2))
@@ -347,6 +367,8 @@
                   (cdr rest))))
             (%make-macro ellipsis (car literals) rules depth env)))))))
 
+;; map, applying `f` from the first element on: map's order is
+;; unspecified, and the expander numbers variables as it goes.
 (define (map-in-order f items)
   (let loop ((items items) (out '()))
     (if (null? items) (reverse out) (loop (cdr items) (cons (f (car items)) out)))))

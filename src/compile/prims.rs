@@ -11,7 +11,7 @@ use std::path::Path;
 use crate::builtins::{Error, Primitive, err, expected, kind, list_arg, prim};
 use crate::globals::CORE_FORMS;
 use crate::compile::syntax_rules::{SyntaxRules, identifier, strip_datum};
-use crate::globals::{Env, TopBinding, cell_value, env_of};
+use crate::globals::{Env, TopBinding, cell_name, cell_value, env_of};
 use crate::heap::{GcRef, Heap, Obj};
 use crate::libraries::{LibraryName, find_library_file, read_file_forms};
 use crate::value::Value;
@@ -124,6 +124,7 @@ pub static PRIMITIVES: &[Primitive] = &[
         env_of(env).borrow_mut().import(id, datum_binding(a[2])?);
         Ok(Value::UNSPECIFIED)
     }),
+    prim("%cell-name", 1, Some(1), |_, a| Ok(cell_name(cell_arg(a[0], "%cell-name")?))),
     prim("%cell-bound?", 1, Some(1), |_, a| Ok(Value::bool(!cell_value(cell_arg(a[0], "%cell-bound?")?).get().is_undefined()))),
     // Macros: a parsed syntax-rules, as data.
     // (%make-macro ellipsis-or-#f (literal ...) ((matcher . template) ...) depth env)
