@@ -147,6 +147,12 @@ pub enum Obj {
 /// The minimum number of allocations between collections (s1's default).
 const GC_THRESHOLD: usize = 20_000;
 
+/// How many allocations, per object that survived the last collection,
+/// come before the next one. 2 rather than 1: a program with a large live
+/// heap re-marks it half as often (`gcbench` 1.33x, `mperm` 1.12x), for a
+/// peak heap up to about 1.4 times larger (plan/09).
+const GC_GROWTH: usize = 2;
+
 /// Owns every heap object.
 pub struct Heap {
     slots: Slots,
@@ -216,14 +222,15 @@ impl Heap {
 
     /// Whether the next safepoint should collect: in stress mode always;
     /// otherwise once there have been more allocations than the threshold
-    /// *and* than the objects that survived the last collection. The second
-    /// condition keeps collection time proportional to allocation, however
-    /// large the live heap grows. With a fixed interval, a computation whose
-    /// live data keeps growing (a deep non-tail recursion) re-marks all of
-    /// it every interval, which is quadratic.
+    /// *and* than `GC_GROWTH` times the objects that survived the last
+    /// collection. The second condition keeps collection time proportional
+    /// to allocation, however large the live heap grows. With a fixed
+    /// interval, a computation whose live data keeps growing (a deep
+    /// non-tail recursion) re-marks all of it every interval, which is
+    /// quadratic.
     #[inline]
     pub fn needs_gc(&self) -> bool {
-        self.stress || self.allocations > GC_THRESHOLD.max(self.live_after_gc)
+        self.stress || self.allocations > GC_THRESHOLD.max(GC_GROWTH * self.live_after_gc)
     }
 
     /// Collect: mark everything reachable from `roots`, the symbol table,

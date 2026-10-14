@@ -5,42 +5,46 @@ template top-level
    3  Call 2
    4  GlobalDefine k3  ; point
    5  Pop
-   6  MakeClosure k4   ; #<template make-point>
-   7  GlobalDefine k5  ; make-point
-   8  Pop
-   9  MakeClosure k6   ; #<template point?>
-  10  GlobalDefine k7  ; point?
+   6  GlobalRef k4     ; %record-indexes
+   7  GlobalRef k3     ; point
+   8  Const k5         ; (x y)
+   9  Call 2
+  10  GlobalDefine k6  ; indexes
   11  Pop
-  12  GlobalRef k8     ; %record-index
-  13  GlobalRef k3     ; point
-  14  Const k9         ; x
-  15  Call 2
-  16  GlobalDefine k10 ; index
+  12  MakeClosure k7   ; #<template make-point>
+  13  GlobalDefine k8  ; make-point
+  14  Pop
+  15  MakeClosure k9   ; #<template point?>
+  16  GlobalDefine k10 ; point?
   17  Pop
-  18  MakeClosure k11  ; #<template point-x>
-  19  GlobalDefine k12 ; point-x
-  20  Pop
-  21  MakeClosure k13  ; #<template set-point-x!>
-  22  GlobalDefine k14 ; set-point-x!
+  18  GlobalRef k11    ; %record-index
+  19  GlobalRef k3     ; point
+  20  Const k12        ; x
+  21  Call 2
+  22  GlobalDefine k13 ; index
   23  Pop
-  24  GlobalRef k8     ; %record-index
-  25  GlobalRef k3     ; point
-  26  Const k15        ; y
-  27  Call 2
-  28  GlobalDefine k16 ; index
+  24  MakeClosure k14  ; #<template point-x>
+  25  GlobalDefine k15 ; point-x
+  26  Pop
+  27  MakeClosure k16  ; #<template set-point-x!>
+  28  GlobalDefine k17 ; set-point-x!
   29  Pop
-  30  MakeClosure k17  ; #<template point-y>
-  31  GlobalDefine k18 ; point-y
-  32  Return
+  30  GlobalRef k11    ; %record-index
+  31  GlobalRef k3     ; point
+  32  Const k18        ; y
+  33  Call 2
+  34  GlobalDefine k19 ; index
+  35  Pop
+  36  MakeClosure k20  ; #<template point-y>
+  37  GlobalDefine k21 ; point-y
+  38  Return
 template make-point  arity 2
-   0  GlobalRef k0     ; %record-make
+   0  GlobalRef k0     ; %record-new
    1  GlobalRef k1     ; point
-   2  Const k2         ; (x y)
-   3  GlobalRef k3     ; list
-   4  LocalRef 0       ; x
-   5  LocalRef 1       ; y
-   6  Call 2
-   7  TailCall 3
+   2  GlobalRef k2     ; indexes
+   3  LocalRef 0       ; x
+   4  LocalRef 1       ; y
+   5  TailCall 4
 template point?  arity 1
    0  GlobalRef k0     ; %record?
    1  LocalRef 0       ; obj

@@ -102,8 +102,15 @@ fn same(c: char) -> char {
 }
 
 fn compare(args: &[Value], who: &str, key: fn(char) -> char, ok: fn(Ordering) -> bool) -> Result<Value, Error> {
-    let cs = args.iter().map(|&a| char_arg(a, who)).collect::<Result<Vec<_>, _>>()?;
-    Ok(Value::bool(cs.windows(2).all(|w| ok(key(w[0]).cmp(&key(w[1]))))))
+    // Pairwise, every argument checked, without collecting them.
+    let mut prev = key(char_arg(args[0], who)?);
+    let mut holds = true;
+    for &a in &args[1..] {
+        let c = key(char_arg(a, who)?);
+        holds &= ok(prev.cmp(&c));
+        prev = c;
+    }
+    Ok(Value::bool(holds))
 }
 
 fn test(v: Value, who: &str, f: fn(char) -> bool) -> Result<Value, Error> {

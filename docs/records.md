@@ -19,4 +19,4 @@ Defines a new record type. `type` is bound to the record type, `constructor` to 
 
 `define-record-type` works at top level and in bodies. Each use creates a distinct type, even with the same name. A record prints as `#<<pare> 1 2>`, its type name followed by its field values.
 
-`define-record-type` is a `syntax-rules` macro in `scheme/core.scm` over internal primitives (`%make-record-type`, `%record-make`, `%record?`, `%record-ref`, `%record-set-index!`). Each accessor finds its field's index once, when the type is defined. Promises are implemented as a record type.
+`define-record-type` is a `syntax-rules` macro in `scheme/core.scm` over internal primitives (`%make-record-type`, `%record-indexes`, `%record-new`, `%record?`, `%record-ref`, `%record-set-index!`). Each accessor and constructor finds its fields' indexes once, when the type is defined. Promises are implemented as a record type.

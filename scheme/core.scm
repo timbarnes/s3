@@ -24,7 +24,10 @@
     ((_ type (constructor field ...) predicate fieldspec ...)
      (begin
        (define type (%make-record-type 'type '(fieldspec ...)))
-       (define (constructor field ...) (%record-make type '(field ...) (list field ...)))
+       ;; The constructor's field indexes, found once, as an accessor's
+       ;; index is: `indexes` is a definition only this expansion sees.
+       (define indexes (%record-indexes type '(field ...)))
+       (define (constructor field ...) (%record-new type indexes field ...))
        (define (predicate obj) (%record? obj type))
        (%define-record-field type fieldspec) ...))))
 

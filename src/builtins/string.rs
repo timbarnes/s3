@@ -116,10 +116,12 @@ fn map_string(heap: &mut Heap, v: Value, who: &str, f: fn(&str) -> String) -> Re
 }
 
 fn compare(args: &[Value], who: &str, fold: bool, ok: fn(Ordering) -> bool) -> Result<Value, Error> {
-    let strs = args
-        .iter()
-        .map(|&a| string_arg(a, who).map(|s| if fold { fold_string(&s.borrow()) } else { s.borrow().to_string() }))
-        .collect::<Result<Vec<String>, Error>>()?;
-    Ok(Value::bool(strs.windows(2).all(|w| ok(w[0].cmp(&w[1])))))
+    // Pairwise, every argument checked; copied only to fold case.
+    let strs = args.iter().map(|&a| string_arg(a, who)).collect::<Result<Vec<_>, Error>>()?;
+    let holds = strs.windows(2).all(|w| {
+        let (a, b) = (w[0].borrow(), w[1].borrow());
+        ok(if fold { fold_string(&a).cmp(&fold_string(&b)) } else { a.as_str().cmp(b.as_str()) })
+    });
+    Ok(Value::bool(holds))
 }
 

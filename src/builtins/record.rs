@@ -7,13 +7,14 @@
 //! 5% of the typical program.
 
 use super::{Error, err, Primitive, expected, kind, list_arg, prim};
-use crate::heap::{GcRef, Heap, Obj};
+use crate::heap::{Heap, Obj};
 use crate::printer::print_value;
 use crate::value::Value;
 
 pub static PRIMITIVES: &[Primitive] = &[
     prim("%make-record-type", 2, Some(2), make_record_type),
-    prim("%record-make", 3, Some(3), record_make),
+    prim("%record-indexes", 2, Some(2), record_indexes),
+    prim("%record-new", 2, None, record_new),
     prim("%record?", 2, Some(2), |_, a| {
         Ok(Value::bool(matches!(kind(a[0]), Some(Obj::Record { rtype, .. }) if Value::obj(*rtype).eq(a[1]))))
     }),
@@ -53,6 +54,37 @@ fn field_index(rtype: Value, field: Value, who: &str) -> Result<usize, Error> {
         .iter()
         .position(|f| f.eq(field))
         .ok_or_else(|| err!("{}: {} has no field {}", who, print_value(name), print_value(field)))
+}
+
+/// `(%record-indexes type field-names)`: the fields' indexes, a vector, for
+/// a constructor to fill in (`%record-new`). Found once, when the record
+/// type is defined, as an accessor's index is.
+fn record_indexes(heap: &mut Heap, args: &[Value]) -> Result<Value, Error> {
+    let indexes = list_arg(args[1], "define-record-type")?
+        .into_iter()
+        .map(|name| Ok(super::fixnum(field_index(args[0], name, "define-record-type")?)))
+        .collect::<Result<Vec<_>, Error>>()?;
+    Ok(heap.vector(indexes))
+}
+
+/// `(%record-new type indexes value ...)`: a record of `type` whose fields
+/// at `indexes` (from `%record-indexes`) hold the values, in order; the
+/// others are unspecified. What a constructor does.
+fn record_new(heap: &mut Heap, args: &[Value]) -> Result<Value, Error> {
+    let n = record_type(args[0], "record constructor")?.1.len();
+    let Some(Obj::Vector(indexes)) = kind(args[1]) else {
+        return Err(err!("record constructor: bad field indexes {}", print_value(args[1])));
+    };
+    let values = &args[2..];
+    if indexes.len() != values.len() {
+        return Err(err!("record constructor: wrong number of arguments: {}", values.len()));
+    }
+    let mut fields = vec![Value::UNSPECIFIED; n];
+    for (i, &v) in indexes.iter().zip(values) {
+        let i = i.get().as_fixnum().and_then(|i| usize::try_from(i).ok()).filter(|&i| i < n);
+        fields[i.ok_or_else(|| err!("record constructor: bad field indexes {}", print_value(args[1])))?] = v;
+    }
+    Ok(heap.record(args[0].as_ref().unwrap(), fields))
 }
 
 /// `(%record-ref obj type index)`: what an accessor does (`Op::RecordRef`).
@@ -95,16 +127,3 @@ fn make_record_type(heap: &mut Heap, args: &[Value]) -> Result<Value, Error> {
     Ok(heap.record_type(args[0], fields))
 }
 
-/// `(%record-make type field-names values)`: fields not named start out
-/// unspecified.
-fn record_make(heap: &mut Heap, args: &[Value]) -> Result<Value, Error> {
-    let n = record_type(args[0], "record constructor")?.1.len();
-    let mut fields = vec![Value::UNSPECIFIED; n];
-    let names = list_arg(args[1], "record constructor")?;
-    let values = list_arg(args[2], "record constructor")?;
-    for (name, value) in names.into_iter().zip(values) {
-        fields[field_index(args[0], name, "record constructor")?] = value;
-    }
-    let rtype: GcRef = args[0].as_ref().unwrap();
-    Ok(heap.record(rtype, fields))
-}
