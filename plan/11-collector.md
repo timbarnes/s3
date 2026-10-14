@@ -1,161 +1,49 @@
-# 11. A generational collector
+# 11. Memory: compact objects, then perhaps a generational collector
 
-Written 2026-10-13, on the `native` branch, for review before any code.
-It comes before native code (10): order 1 of the review. The collector
-changes what stores into the heap must do, and native code would
-otherwise have to be revisited.
+Written 2026-10-13 as a plan for a generational collector. Rewritten the
+same day after G0 measured where time and memory actually go. It comes
+before native code (10): order 1 of the review.
 
 ## Why
 
-Two of the gaps plan/07 found against Gauche are the collector's:
+plan/07 found two gaps against Gauche that it put down to the collector:
 
 - **Allocation-heavy programs are slow.** `mperm` runs at 0.62 of
-  Gauche's speed, `earley` at 0.64, and `destruc` and the `boyer`s lose
-  too. Every collection re-marks the whole live heap (03 §4, D3), so a
-  program that keeps a large structure live pays for it at every
-  collection.
-- **Peak memory is large.** `earley` reaches 7.5GB, `mperm` 3.9GB and
-  `gcbench` 508MB (09, after `GC_GROWTH` became 2). With collections
-  spaced in proportion to the live heap, the heap reaches about
-  `1 + GC_GROWTH` times the live data before it is swept. Pages are never
-  given back (`Slots`' ponytail note).
+  Gauche's speed and `earley` at 0.64.
+- **Peak memory is large.** `earley` reaches 8.1GB, `mperm` 3.9GB and
+  `nboyer` 2.8GB.
 
-Native code doesn't help with either. A generational collector helps
-both:
+The first plan was a generational collector. G0 measured first, and
+found:
 
-- young objects are collected often and cheaply, without marking the old
-  ones;
-- the old generation is collected rarely, so the growth factor that
-  spaces collections can come down, which brings the peak down with it.
+- the collector is only 5-27% of the time, so a generational collector
+  could gain 1.05-1.2x at most;
+- the memory comes from the size of objects: every object takes an
+  80-byte slot, and most objects are 16-byte pairs.
 
-## The constraint: objects don't move
+So the order is now:
 
-A copying nursery is the usual design, but s3 depends everywhere on
-objects staying where they are:
+1. compact objects (G1, G2);
+2. scheduling and returning memory (G3);
+3. a generational collector only if it is still needed (G4).
 
-- a `GcRef` is an address, and `Value` holds it;
-- the dispatch loop's `Frame` holds `&'static Template` and the closure's
-  free-variable slice;
-- builtins hold `&Obj` across allocations;
-- `eq?` hashing for hash tables (09, "what follows") wants addresses that
-  don't change;
-- native code (10) relies on values not moving between safepoints.
+## G0. Measure first (done)
 
-Making objects move would mean finding and updating every one of those,
-or adding a level of indirection everywhere. So this plan keeps objects
-in place.
+`--features gcstats` (`src/gcstats.rs`) prints, at exit:
 
-**The design: sticky mark bits.** This is the non-moving generational
-scheme of Demers et al. (1990), which Boehm's generational mode and
-Ruby's RGenGC also use:
+- allocations by kind, and bytes, including what is boxed outside the
+  slot;
+- mark and sweep times;
+- how many objects survive their first collection;
+- how much of the marking is spent on objects that survived before;
+- peak live data and peak slots.
 
-- **An object is young or old.** It is born young. If it survives a
-  collection it becomes old, and its mark "sticks": a minor collection
-  treats it as already marked and doesn't trace through it.
-- **A minor collection:**
-  1. marks from the roots and from the remembered set;
-  2. stops at old objects;
-  3. sweeps only the objects allocated since the last collection, which
-     `Heap` keeps in a list (8 bytes per allocation);
-  4. turns the survivors old.
-- **The remembered set** holds the old objects into which a young
-  reference has been stored since the last collection. The write
-  barrier adds them, and each one carries a flag so it is added once.
-- **A major collection** is today's: mark everything, sweep every page.
-  It runs when the old generation has grown by a factor since the last
-  one.
+It is a feature of its own because `stats`' per-instruction counting
+would distort the times.
 
-All of the existing machinery stays:
+### G0 results
 
-- collection only at safepoints;
-- explicit roots;
-- the worklist;
-- `Slots`' pages and free list;
-- stress and poison modes.
-
-The epoch mark becomes an epoch plus an age.
-
-## The write barrier
-
-Every store of a `Value` into a heap object goes through one function:
-
-```rust
-heap.store(owner, &field, v)   // field.set(v), then: if owner is old and v is a
-                               // young object, remember owner
-```
-
-Today, a mutable field is a `Cell<Value>` that anyone can `set`. G1
-replaces it with a type, `Field`, whose only setter is `Heap::store`, so
-**the compiler finds every store**, and a store added later can't skip
-the barrier. There are about 20 stores of a `Value` today:
-
-- the dispatch loop: `PatchFree`, `BoxSet`, `GlobalSet`,
-  `GlobalDefine`, `VectorSet` and `RecordSet`;
-- `set-car!`, `set-cdr!`, `list-set!`, `vector-set!`, `vector-fill!`
-  and `vector-copy!`;
-- record modifiers;
-- binding cells in `globals.rs` and `main.rs`;
-- the reader's patching of datum labels (`#0=`);
-- one store in the printer.
-
-**Environments** keep their bindings in a Rust hash map, not in fields.
-`Env::bind` and `own_cell` call the barrier on the environment object
-themselves.
-
-**Objects that are written only while they are made** need no barrier:
-continuations, escapes, templates, error objects, record types and
-macros. This holds while each is still young when it is filled. `Field`
-makes any exception visible.
-
-**Native code** (10) uses the same barrier, through `S3_STORE` in
-`s3.h`: the check inline in C, and remembering the object through the
-API table.
-
-## What changes
-
-| File | Change |
-|---|---|
-| `src/heap.rs` | The age bit, the young list, the remembered set, minor and major `collect`, `store`, `Field`, scheduling |
-| `src/vm/machine.rs` | The store arms call `heap.store`. `safepoint` is unchanged: it passes the same roots |
-| `src/builtins/*.rs`, `globals.rs`, `libraries.rs`, `fasl.rs`, `reader/parser.rs` | Stores go through `heap.store` |
-| Everything else | Unchanged: reads are `field.get()` as now |
-
-Nothing changes for Scheme code, the compiler or the boot images.
-
-## Phases
-
-The phases use the same rules as before: each ends with every test
-passing in release, debug, and GC stress with poisoning. Speed is
-measured in cycles with `/usr/bin/time -l`, against the commit before.
-
-### G0. Measure first
-
-There is no design change in this phase. Under `--features stats`,
-collect:
-
-- **allocations by kind,** and bytes including the boxed parts (vector
-  contents, strings, bignums);
-- **collection time split** into marking, sweeping and dropping objects
-  (dropping includes freeing their boxes);
-- **survival rate:** the fraction of objects still live at the first
-  collection after they were made, which is the generational hypothesis
-  for these programs;
-- **live data after each collection,** against peak RSS.
-
-The programs: `earley`, `mperm`, `gcbench`, `nboyer`, `paraffins`,
-`deriv`, `destruc`, `bench/compile.sh` and `deeprec`.
-
-- **Decides:**
-  - whether G2 is worth building: it is if most collection time is
-    re-marking objects that survive, and few young objects survive;
-  - whether G4 is: it is if pairs are most of the bytes.
-- **Exit:** a table of these numbers in this document.
-
-#### G0 results (2026-10-13)
-
-`--features gcstats` (`src/gcstats.rs`), a feature of its own: `stats`
-counts every instruction, which would distort the times. The r7rs
-benchmarks were run at scale 10, as in 07; peak RSS, cycles and system
+The r7rs benchmarks were run at scale 10, as in 07; peak RSS, cycles and system
 time come from `/usr/bin/time -l`.
 
 | | GC % of run (mark + sweep) | survive first GC | old in marking | pairs % | closures % | peak live | peak slots | peak RSS |
@@ -191,7 +79,7 @@ isn't stalling on memory to any great degree.
    - 1.1-1.2x on earley and paraffins;
    - 1.03-1.06x on mperm, gcbench and nboyer.
 
-   G2's 1.5x target can't be reached. mperm's and earley's gap to
+   The 1.5x first planned can't be reached. mperm's and earley's gap to
    Gauche is mostly the cost of each instruction, which plan/10
    addresses.
 2. **Memory is the real problem, and it is the size of objects.** Pairs
@@ -215,125 +103,152 @@ isn't stalling on memory to any great degree.
    fewer cycles, destruc 1.01x and gcbench 0.99x. That's small, but it
    is a one-line change.
 
-**Revised order, for review:**
+## The constraint: objects don't move
 
-1. **G4 becomes the first phase, and is broader: compact objects.** Pairs
-   go in their own pages of 16-byte slots, with a mark bitmap per page
-   and a `Value` tag of their own (tags 5-7 are free). There are 27
-   `Obj::Pair` match sites. Closures with their free variables inline
-   come next, if pairs alone show that compact objects pay.
-   - **Target:** peak RSS halved or better on earley, mperm and nboyer.
-   - **To measure:** cycles, which could gain from better cache use or
-     lose to the second kind of slot.
-2. **`GC_THRESHOLD` raised**, measured on `bench/` and the r7rs set.
-3. **G1-G3 (the barrier and minor collections) deferred.** They are
-   worth doing only if, after compact objects, collection time is still
-   a large share in programs that matter. G0's numbers suggest 1.05-1.2x.
-   The barrier rule in plan/10 (`S3_STORE`) stays: it costs nothing, and
-   it keeps the generational collector possible.
+s3 depends everywhere on objects staying where they are:
 
-### G1. The barrier, doing nothing
+- a `GcRef` is an address, and `Value` holds it;
+- the dispatch loop's `Frame` holds `&'static Template` and the closure's
+  free-variable slice;
+- builtins hold `&Obj` across allocations;
+- `eq?` hashing for hash tables (09, "what follows") wants addresses that
+  don't change;
+- native code (10) relies on values not moving between safepoints.
 
-- `Field` replaces `Cell<Value>` in heap objects.
-- Every store goes through `heap.store`, which only stores for now.
-- The environment hooks are added.
-- **A checking mode, `S3_GC_VERIFY`.** Before each collection it walks
-  the heap and fails if an old object refers to a young one without
-  being in the remembered set. Ages exist only in this mode, so the mode
-  can find a missed barrier before G2 relies on it.
+Every phase below keeps objects in place. Compact objects change where
+new objects are put, not whether they move.
 
-- **Exit:** every test passes, with stress and with `S3_GC_VERIFY`.
-  Cycles are unchanged on `bench/` and the r7rs set (the barrier is an
-  inline call that does nothing yet).
+## Phases
 
-### G2. Minor collections
+The phases use the same rules as before: each ends with every test
+passing in release, debug, and GC stress with poisoning. Speed is
+measured in cycles with `/usr/bin/time -l`, against the commit before.
+Memory is measured as peak RSS, and with `--features gcstats`.
 
-Add the age, the young list, the remembered set, minor collections, and
-promotion after one survival. Major collections are today's collector.
+### G1. Compact pairs
 
-- **Scheduling:**
-  - a minor collection after `NURSERY` allocations;
-  - a major collection when the old generation reaches `GC_GROWTH` times
-    its size after the last major.
-- **Roots in a minor collection** are those `safepoint` passes, plus the
-  remembered set, `pinned` and the libraries. The symbol table doesn't
-  need scanning: symbols are old and point at nothing.
-- **Stress mode** makes a minor collection at every safepoint and a major
-  collection at every hundredth. `S3_GC_VERIFY` runs in the test suite's
-  stress run.
+Pairs leave `Obj` and get pages of their own:
 
-- **Exit:** every test passes in stress, poison and verify modes, and so
-  does chibi's suite. Measured on the allocation-heavy benchmarks above
-  and on the vector loops (`array1`, `puzzle`, `pnpoly`), where the
-  barrier costs most.
-- **Target, to confirm after G0:** `mperm`, `earley` and `gcbench` at
-  least 1.5x faster in cycles, and no benchmark more than 3% slower.
+- **16-byte slots**, holding only the car and the cdr.
+- **Pages aligned to their size** (64KB, 4,096 pairs). A pair's page
+  header is then found by masking its address. The header holds a mark
+  bitmap, one bit per slot.
+- **A `Value` tag of their own**, `PAIR` (tags 5-7 are free), so
+  `pair?`, `car` and `cdr` test the tag and never touch a header.
+- **Free pairs are threaded through their cdr.**
+- **Marking a pair** sets its bit. The worklist holds `Value`s, so it
+  can hold pairs and objects alike. A collection clears the pair
+  bitmaps first, which is a few hundred bytes for every megabyte of
+  pairs: epochs aren't needed for pairs.
+- **Sweeping a pair page** is a pass over its bitmap words. A pair owns
+  nothing, so nothing is dropped, and a page whose bits are all clear
+  can be given back (G3).
+- **Poison mode** fills a freed pair with `<<FREED>>` and never reuses
+  it, as it does now.
 
-### G3. Memory
+**The compiler finds the sites.** Removing `Obj::Pair` turns every place
+that matched on it into a compile error: 27 matches, in the printer,
+`syntax_rules.rs`, `heap.rs`, the reader, `fasl.rs` and the builtins.
+The maps keyed by `GcRef` (printer and reader datum labels, `equal?`'s
+cycle check, `fasl.rs`' sharing) take a key that covers both, an address
+with its tag, which the `Value` itself already is.
 
-- `NURSERY` and the major growth factor are set by measuring.
-- Empty pages are given back to the system after a major collection,
-  removing `Slots`' ponytail note.
+- **Exit:**
+  - every test passes, and so does chibi's suite;
+  - peak RSS on earley, mperm, nboyer and paraffins, against G0's;
+  - cycles on `bench/` and the r7rs set. Better cache use could make
+    them faster; the second kind of slot could make them slower.
+- **Target:** peak RSS halved or better on earley, mperm and nboyer, with
+  no benchmark more than 3% slower.
 
-- **Exit:** peak RSS for `earley`, `mperm` and `gcbench` measured against
-  today's. **Target:** half or less, with G2's speed kept.
+### G2. Compact closures and records (if G1 pays)
 
-### G4. Smaller pairs (if G0 says so)
+Closures are most of the objects that aren't pairs: 22% in mperm, 30% in
+earley. Each takes an 80-byte slot, plus an array of free variables
+allocated separately (3.1GB of them in earley). gcbench is all records,
+with their fields boxed the same way. The plan:
 
-Every object is 80 bytes, the size of the `Obj` enum, so a pair takes
-five times its 16 bytes of content. If pairs are most of the bytes, they
-move to their own pages of 24-byte slots (a mark word, the car and the
-cdr), with a `Value` tag of their own. This is a larger change: every
-`Obj::Pair` match becomes `Value::as_pair`. It is done after G2, so the
-collector already handles two kinds of slot ages and the remembered set
-when it gains a second slot size.
+- size classes of slots (for example 16, 32, 48 and 64 bytes);
+- a closure's free variables, and a record's fields, inline after a
+  small header;
+- the same bitmap marking as G1.
 
-- **Exit:** peak memory and cycles, against G3.
+The free-variable slice that `Frame` holds stays valid, because objects
+don't move.
 
-### G5. Only if measured
+- **Exit:** as G1. Measured on earley, mperm and gcbench.
+- **Decided after G1:** whether to go on, and whether vectors should
+  join.
 
-- **Scanning only part of the stack.** A minor collection scans the
-  whole value stack. A deep recursion (`deeprec`) then pays for its
-  depth at every minor collection. The fix is to keep a mark of how
-  much of the stack hasn't changed since the last collection and scan
-  only above it.
-- **Card marking for large vectors.** An old vector written in a loop
-  is remembered whole and rescanned at every minor collection. The fix
-  remembers only the parts of the vector written.
+### G3. Scheduling and returning memory
+
+- **`GC_THRESHOLD`** raised from 20,000 to a value measured on `bench/`
+  and the r7rs set. G0: 200,000 gave deriv 1.06x and the others about
+  1.0x.
+- **Empty pages given back** to the system after a collection, removing
+  `Slots`' ponytail note. With pair pages this is a bitmap test.
+- **`GC_GROWTH`** measured again: with compact objects, a growth factor
+  costs fewer bytes.
+
+- **Exit:** peak RSS and cycles against G2.
+
+### G4. A generational collector (deferred)
+
+This is worth building only if, after G1-G3, collection time is still a
+large share of programs that matter. G0 bounds the gain at 1.05-1.2x
+today, and G0 also found that young objects survive poorly in the large
+programs (30-84%).
+
+If it is built, the design stays as first planned:
+
+- **Sticky mark bits** (Demers et al. 1990), the non-moving scheme that
+  Boehm's generational mode and Ruby's RGenGC use:
+  - an object surviving a collection becomes old;
+  - a minor collection marks from the roots and the remembered set,
+    stops at old objects, and sweeps only the objects allocated since
+    the collection before.
+- **Promotion after two survivals**, not one, given G0's survival rates.
+- **A write barrier:**
+  - every store of a `Value` into a heap object goes through
+    `Heap::store`;
+  - a `Field` type replaces `Cell<Value>`, so the compiler finds every
+    store (about 20 today: the dispatch loop's `PatchFree`, `BoxSet`,
+    `GlobalSet`, `GlobalDefine`, `VectorSet` and `RecordSet`, the
+    mutating builtins, binding cells, and the reader's datum labels);
+  - environments call it from `Env::bind` and `own_cell`.
+- **`S3_GC_VERIFY`** checks at every collection that no old object
+  refers to a young one without being remembered. Stress mode makes
+  minor collections constant.
+- **If measured:** scanning only the part of the stack that changed
+  since the last collection, and card marking for large vectors.
+
+Native code (10) writes every store as `S3_STORE`, so this stays
+possible after native code exists. Until G4, `S3_STORE` is a plain
+store.
 
 ## Decisions to confirm
 
 | # | Decision | Recommendation |
 |---|---|---|
-| G-a | Moving or not | Non-moving: sticky mark bits |
-| G-b | Finding young objects to sweep | A list of objects allocated since the last collection, not a sweep of every page |
-| G-c | Promotion | After one survival. An age counter only if G0 or G2 shows old-generation garbage from objects promoted too early |
-| G-d | The barrier | An object-granular remembered set, with a flag per object. Card marking only if G5 shows it |
-| G-e | Enforcing the barrier | A `Field` type whose setter is `Heap::store`, plus `S3_GC_VERIFY` |
-| G-f | Smaller pairs | Only if G0 shows pairs dominating the bytes |
-| G-g | Branch | Implemented on its own branch, `collector`, from `main`. `native` keeps the plans until then |
+| G-a | Moving or not | Non-moving, in every phase |
+| G-b | Order | Compact pairs (G1), then closures and records if G1 pays (G2), then scheduling (G3). Generational (G4) deferred |
+| G-c | Pair layout | 16-byte slots in size-aligned pages, a mark bitmap in the page header, a `PAIR` tag in `Value` |
+| G-d | Finding the sites | Remove `Obj::Pair`, so the compiler lists them |
+| G-e | Branch | `collector`, from `main` plus the plans |
 
 ## Risks
 
-- **A missed barrier frees a live object.** This is the classic
-  generational bug, and it shows up long after the store that caused it.
-  The defences, in order:
-  1. `Field` makes missing a barrier a compile error;
-  2. `S3_GC_VERIFY` checks the invariant at every collection;
-  3. stress mode makes minor collections constant;
-  4. poison mode makes a premature free visible.
-- **The barrier's cost in tight store loops** (`vector-set!` in
-  `array1`, `puzzle`, `pnpoly`). The fast path is two tests: is the owner
-  old, and is the value a young object. G2 measures it. If it costs more
-  than a few percent, the test can be inlined into the `VectorSet` arm
-  and the slow path moved out of line.
-- **Rust code holding a young `GcRef` that isn't a root.** The contract
-  is unchanged: a `GcRef` is valid while it is reachable from the roots
-  at every safepoint. Minor collections only make a violation show up
-  sooner.
-- **The dispatch loop's code generation** (09): store arms change in G1.
-  Cycles are checked there, before any collector change, so a slowdown
-  from code layout is told apart from one from collecting.
+- **Two kinds of heap reference.** Code that takes any object as a
+  `GcRef` no longer sees pairs. Removing `Obj::Pair` makes the type
+  checker find the matches. The maps keyed by `GcRef` have to be found
+  by reading, and their tests (datum labels in the printer and reader,
+  `equal?` on cyclic lists, `fasl.rs` sharing) cover them.
+- **The dispatch loop's code generation** (09). `Car`, `Cdr`, `Cons`,
+  `PairP`, `CarLocal` and `CdrLocal` all change. They get cheaper on
+  paper (a tag test instead of loading the object's kind), but layout
+  effects have moved fib and sum by 3-4% before. Measured in G1.
+- **A premature free in the new sweep.** Stress and poison modes cover
+  pairs from the first commit of G1, as they cover everything else.
 
 ## Reading
 

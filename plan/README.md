@@ -49,7 +49,7 @@ in `docs/`).
 | [08-compiler-in-scheme.md](08-compiler-in-scheme.md) | The plan for P13: the decisions to settle, sub-phases P13.0-P13.6 and their exit tests, and the risks |
 | [09-s3.md](09-s3.md) | s3: S0 removes the Rust compiler, commits the boot images and adds a verifier; what follows |
 | [10-native.md](10-native.md) | Native code, for review: templates translated to C in Scheme, loaded with `dlopen`, calls through the dispatch loop; phases N0-N6. Follows 11 |
-| [11-collector.md](11-collector.md) | A generational collector, for review: non-moving, sticky mark bits, a write barrier enforced by type; phases G0-G5. Comes before 10 |
+| [11-collector.md](11-collector.md) | Memory, for review: G0's measurements, then compact pairs, closures and records, scheduling; a generational collector deferred; phases G0-G4. Comes before 10 |
 
 Read them in order the first time. During implementation, 04 is the working
 document, and 03 is the reference for why things are shaped as they are.

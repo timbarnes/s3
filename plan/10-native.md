@@ -3,9 +3,9 @@
 Written 2026-10-13, on the `native` branch, for review before any code.
 06 §5 recorded native code as a later direction and said that, with the
 compiler in Scheme, a C backend was the natural route. This document
-chooses a design and splits it into phases N0-N6. It follows the
-generational collector (11), which comes first: native code depends on
-that collector's write barrier.
+chooses a design and splits it into phases N0-N6. It follows the memory
+work in 11, which comes first. Its stores go through a barrier macro, so
+a generational collector (11, G4) stays possible.
 
 ## The approach in one paragraph
 
@@ -96,12 +96,11 @@ collects (03 §4), so values held in C variables stay valid.
 object (`BoxSet`, `GlobalSet`, `GlobalDefine`, `PatchFree`, `VectorSet`,
 `RecordSet`, and any later one) is written in the generated C as
 `S3_STORE(owner, field, v)`, never as a plain assignment. In `s3.h`,
-that macro stores the value, then does the check `Heap::store` does
-(11): if the owner is old and the value is a young object, it remembers
-the owner through the API table. This rule holds from N0's hand-written
-C onwards. The emitter has one place that writes stores, and N2's tests
-run with `S3_GC_VERIFY`, so a store that skips the barrier fails the
-tests.
+that macro is a plain store until a generational collector exists (11,
+G4). Then it also does the check `Heap::store` does: if the owner is old
+and the value is a young object, it remembers the owner through the API
+table. This rule holds from N0's hand-written C onwards, and the emitter
+has one place that writes stores.
 
 **`s3.h`** is written by hand and lives in `src/native/`. It is built into
 the binary with `include_str!` and written beside the generated C, so a
@@ -256,7 +255,7 @@ profile shows boxing or type checks dominating.
 | N-f | When it is used | Opt-in (`--native`, `native-compile-file`); `S3_NATIVE=1` for testing |
 | N-g | Platforms | macOS and Linux with clang or gcc. Windows and the ESP32 are not planned (the design doesn't rule them out) |
 | N-h | C extensions | `__builtin_add_overflow` and friends, which clang and gcc have, for fixnum arithmetic |
-| N-i | Stores | Always `S3_STORE`, the collector's barrier (11), from N0 on |
+| N-i | Stores | Always `S3_STORE`, from N0 on: a plain store now, the barrier if 11's G4 is built |
 
 ## Risks
 
@@ -268,10 +267,11 @@ profile shows boxing or type checks dominating.
 - **Templates changed after they start running.** Native code is attached
   at load, before a template runs. `S3_NATIVE=1` in N2 attaches it before
   first use, too.
-- **A store that skips the barrier** frees a live young object, and the
-  failure shows up long after the store. `S3_STORE` is the only way the
-  emitter writes a store, and `S3_GC_VERIFY` (11, G1) runs with the
-  native test suite.
+- **A store that skips the barrier** would free a live young object once
+  a generational collector exists, and the failure would show up long
+  after the store. `S3_STORE` is the only way the emitter writes a
+  store, and `S3_GC_VERIFY` (11, G4) would run with the native test
+  suite.
 - **Diverging semantics.** Each instruction's C is written beside its
   dispatch loop arm, and N2's exit runs the whole suite through native
   code. An inlined primitive's slow path is always the builtin itself.
