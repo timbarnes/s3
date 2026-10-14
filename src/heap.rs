@@ -1,7 +1,8 @@
 //! The heap: object layout, allocation and the symbol table (plan/03 §3-4).
 //!
-//! Every object is its own `Box`, and the heap keeps a list of them. Objects
-//! never move, so a `GcRef` stays valid for as long as the object is alive.
+//! Every object is one slot of `Slots`: pages of same-sized slots, with a
+//! free list (heap step 2, plan/09). Objects never move, so a `GcRef`
+//! stays valid for as long as the object is alive.
 //! Mutable fields are `Cell`s (or a `RefCell` for strings), so all access is
 //! through shared references, unlike s1's `get_value_mut(&self)`.
 //!
@@ -148,7 +149,7 @@ const GC_THRESHOLD: usize = 20_000;
 
 /// Owns every heap object.
 pub struct Heap {
-    objects: Vec<GcRef>,
+    slots: Slots,
     symbols: FxHashMap<Box<str>, GcRef>,
     /// Allocations since the last collection.
     allocations: usize,
@@ -181,12 +182,12 @@ impl Heap {
     /// The number of objects on the heap, live or not yet collected.
     #[cfg(test)]
     pub fn object_count(&self) -> usize {
-        self.objects.len()
+        self.slots.count
     }
 
     pub fn new() -> Heap {
         Heap {
-            objects: Vec::new(),
+            slots: Slots::default(),
             symbols: FxHashMap::default(),
             allocations: 0,
             live_after_gc: 0,
@@ -205,15 +206,12 @@ impl Heap {
 
     fn alloc(&mut self, kind: Obj) -> Value {
         self.allocations += 1;
-        let boxed = Box::new(GcObject { mark: Cell::new(0), kind });
-        let r = GcRef(NonNull::from(Box::leak(boxed)));
-        self.objects.push(r);
-        Value::obj(r)
+        Value::obj(GcRef(self.slots.alloc(kind)))
     }
 
     /// The number of objects in the heap, live or not yet collected.
     pub fn len(&self) -> usize {
-        self.objects.len()
+        self.slots.count
     }
 
     /// Whether the next safepoint should collect: in stress mode always;
@@ -244,33 +242,16 @@ impl Heap {
         self.marked += m.count;
         self.collections += 1;
 
-        let (epoch, poison) = (self.epoch, self.poison);
-        self.objects.retain(|&r| {
-            let live = r.get().mark.get() == epoch;
-            if !live {
-                let p = r.0.as_ptr();
-                // Safety: the object is unreachable from the roots, so
-                // nothing that will be used again refers to it. (A stray
-                // reference is exactly the bug poison mode exists to show.)
-                unsafe {
-                    if poison {
-                        (*p).kind = Obj::Symbol("<<FREED>>".into());
-                    } else {
-                        drop(Box::from_raw(p));
-                    }
-                }
-            }
-            live
-        });
+        self.slots.sweep(self.epoch, self.poison);
         self.allocations = 0;
-        self.live_after_gc = self.objects.len();
+        self.live_after_gc = self.slots.count;
     }
 
     /// Write out every file output port's buffer: before the process
     /// exits, which runs no destructors.
     pub fn flush_ports(&self) {
-        for r in &self.objects {
-            if let Obj::Port(port) = &r.get().kind
+        for r in self.slots.objects() {
+            if let Obj::Port(port) = &r.kind
                 && let Ok(mut port) = port.try_borrow_mut()
                 && let PortKind::FileOutput { file, .. } = &mut *port
             {
@@ -557,14 +538,119 @@ pub fn list_to_vec(mut v: Value) -> Option<Vec<Value>> {
     v.is_nil().then_some(items)
 }
 
-impl Drop for Heap {
+/// Where objects live: pages of `PAGE_SLOTS` slots of one `GcObject`
+/// each. A slot's `mark` says what it holds: an epoch for an object (live
+/// if it is the current one), `FREE` for a slot on the free list, whose
+/// `kind` is not initialised, or `POISONED` for an object poison mode
+/// keeps, which is never swept again or reused. Pages are never moved or
+/// returned to the system.
+/// ponytail: memory stays at its high-water mark; give empty pages back if
+/// that matters.
+#[derive(Default)]
+struct Slots {
+    pages: Vec<NonNull<GcObject>>,
+    free: Vec<NonNull<GcObject>>,
+    /// Objects in use (poisoned ones not counted).
+    count: usize,
+}
+
+const PAGE_SLOTS: usize = 1024;
+const FREE: u64 = u64::MAX;
+const POISONED: u64 = u64::MAX - 1;
+
+impl Slots {
+    fn page_layout() -> std::alloc::Layout {
+        std::alloc::Layout::array::<GcObject>(PAGE_SLOTS).unwrap()
+    }
+
+    /// A slot holding a new object of kind `kind`, unmarked.
+    fn alloc(&mut self, kind: Obj) -> NonNull<GcObject> {
+        let p = match self.free.pop() {
+            Some(p) => p,
+            None => self.new_page(),
+        };
+        // SAFETY: a free slot is valid memory whose `kind` holds nothing
+        // to drop.
+        unsafe { p.as_ptr().write(GcObject { mark: Cell::new(0), kind }) };
+        self.count += 1;
+        p
+    }
+
+    /// Add a page, its slots free, and take its first.
+    #[cold]
+    fn new_page(&mut self) -> NonNull<GcObject> {
+        let layout = Self::page_layout();
+        // SAFETY: the layout isn't zero-sized.
+        let base = NonNull::new(unsafe { std::alloc::alloc(layout) } as *mut GcObject).unwrap_or_else(|| std::alloc::handle_alloc_error(layout));
+        self.pages.push(base);
+        // Free in reverse, so the page is used from its start.
+        for i in (0..PAGE_SLOTS).rev() {
+            // SAFETY: slot i of the page; only its mark is written.
+            let p = unsafe { base.add(i) };
+            unsafe { std::ptr::addr_of_mut!((*p.as_ptr()).mark).write(Cell::new(FREE)) };
+            self.free.push(p);
+        }
+        self.free.pop().unwrap()
+    }
+
+    /// Every slot of every page.
+    fn all(&self) -> impl Iterator<Item = NonNull<GcObject>> + '_ {
+        // SAFETY: each is a slot of an allocated page.
+        self.pages.iter().flat_map(|&base| (0..PAGE_SLOTS).map(move |i| unsafe { base.add(i) }))
+    }
+
+    /// The objects in use.
+    fn objects(&self) -> impl Iterator<Item = &GcObject> + '_ {
+        // SAFETY: a slot whose mark is an epoch holds an object.
+        self.all().filter(|p| unsafe { (*p.as_ptr()).mark.get() } < POISONED).map(|p| unsafe { &*p.as_ptr() })
+    }
+
+    /// Free every object not marked in `epoch`, or in poison mode turn it
+    /// into the symbol `<<FREED>>` and keep it.
+    fn sweep(&mut self, epoch: u64, poison: bool) {
+        for i in 0..self.pages.len() {
+            let base = self.pages[i];
+            for j in 0..PAGE_SLOTS {
+                // SAFETY: slot j of a page. A slot with an old epoch holds
+                // an object unreachable from the roots, so nothing that
+                // will be used again refers to it (a stray reference is
+                // the bug poison mode exists to show).
+                unsafe {
+                    let p = base.add(j).as_ptr();
+                    let mark = (*p).mark.get();
+                    if mark == epoch || mark >= POISONED {
+                        continue;
+                    }
+                    self.count -= 1;
+                    if poison {
+                        (*p).kind = Obj::Symbol("<<FREED>>".into());
+                        (*p).mark.set(POISONED);
+                    } else {
+                        std::ptr::drop_in_place(std::ptr::addr_of_mut!((*p).kind));
+                        (*p).mark.set(FREE);
+                        self.free.push(NonNull::new_unchecked(p));
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Slots {
     fn drop(&mut self) {
-        for r in self.objects.drain(..) {
-            // Safety: every GcRef in `objects` came from Box::leak in alloc,
-            // and each is freed once (sweep removes what it frees). Values
-            // outliving the heap dangle, which s3's single long-lived heap
-            // never does.
-            drop(unsafe { Box::from_raw(r.0.as_ptr()) });
+        // Values outliving the heap dangle, which s3's single long-lived
+        // heap never does.
+        for p in self.all().collect::<Vec<_>>() {
+            // SAFETY: an object in use, or poisoned, is dropped once.
+            unsafe {
+                if (*p.as_ptr()).mark.get() != FREE {
+                    std::ptr::drop_in_place(std::ptr::addr_of_mut!((*p.as_ptr()).kind));
+                }
+            }
+        }
+        for &base in &self.pages {
+            // SAFETY: allocated in new_page with this layout.
+            unsafe { std::alloc::dealloc(base.as_ptr().cast(), Self::page_layout()) };
         }
     }
 }
