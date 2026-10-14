@@ -6,8 +6,8 @@ on one machine, an Apple M2 Max running macOS 27.0.1, with the scripts in
 
 In short:
 
-- **Performance.** s3 (2026-10-13) is 1.08 times faster than Gauche over
-  ecraven's benchmarks, and 1.6 times faster than s2 at P12; Chicken,
+- **Performance.** s3 (2026-10-13) is 1.14 times faster than Gauche over
+  ecraven's benchmarks, and about 1.7 times faster than s2 at P12; Chicken,
   Guile and the native-code compilers remain faster. At P12: of these ten
   systems, only chibi and s1 were slower than s2. Over the benchmarks both finish, chibi takes 3.6 times as long as s2,
   and s1 5.8 times. Gauche, the closest design to s2's, takes 0.68 of s2's
@@ -172,6 +172,18 @@ features that would make it practical rather than educational:
 
 ## Performance
 
+> **s3, 2026-10-13, after collector scheduling and the record and
+> comparison builtins** (plan/09): s3 alone, `bench/r7rs/run.sh -n 3
+> -t 120 s3`, against Gauche's medians from the run below (same machine,
+> Gauche unchanged). **s3 is 1.14 times faster than Gauche** (geometric
+> mean over 56), faster on 30 and slower on 26; its own times are 1.05
+> times better than in that run, `gcbench` 3.38x (now 1.76 times
+> Gauche's speed, from 0.52), `wc` 1.27x, `mperm` 1.16x, `graphs` and
+> `cat` 1.13x, `earley` 1.10x. Furthest behind now: `puzzle` 0.59, `cat`
+> 0.61, `mperm` 0.62, `earley` 0.64, `pnpoly` 0.65, `sum` and `array1`
+> 0.70: allocation and the VM's cost per instruction. The table at the
+> end of this section is this run's.
+>
 > **s3, 2026-10-13, after the heap's two steps** (objects of 80 bytes
 > rather than 128, mimalloc's unaligned path, pages of slots; plan/09):
 > `bench/r7rs/run.sh -n 3 -t 120 "s3 gauche"`, medians of three rounds.
@@ -180,7 +192,7 @@ features that would make it practical rather than educational:
 > own times are 1.11 times better than in the run earlier that day,
 > before the heap work (Gauche's moved 2%). s3 is still furthest behind
 > on `gcbench` (0.52, from 0.35), `mperm` and `cat` (0.54), `puzzle` and
-> `earley` (0.58), `wc` (0.61). The table is at the end of this section.
+> `earley` (0.58), `wc` (0.61).
 >
 > **s3, 2026-10-13, earlier** (after S1, record access and inlining for
 > programs; one round, `bench/r7rs/run.sh -n 1 -t 120 "s3 gauche guile
@@ -336,69 +348,71 @@ published ones: Chicken's `tak` takes 11.0s here and 10.8s there.
 - Between the two runs, s2's medians agree within 0.95-1.04x, 0.999 on
   average. That is the same noise as in P10 and P12.
 
-**s3 against Gauche, 2026-10-13, after the heap work.** Medians of three
-rounds, in seconds, at a tenth of the suite's iteration counts. The last
-column is Gauche's time over s3's: above 1, s3 is faster.
+**s3 against Gauche, 2026-10-13, latest.** s3's medians of three rounds
+after collector scheduling and the builtin fixes; Gauche's from the run
+before (three rounds, same machine). In seconds, at a tenth of the
+suite's iteration counts. The last column is Gauche's time over s3's:
+above 1, s3 is faster.
 
 | benchmark | s3 | Gauche | Gauche / s3 |
 |---|---:|---:|---:|
-| browse | 1.615 | 1.288 | 0.80 |
-| deriv | 1.670 | 1.832 | 1.10 |
-| destruc | 2.125 | 1.510 | 0.71 |
-| diviter | 1.467 | 1.012 | 0.69 |
-| divrec | 1.638 | 1.387 | 0.85 |
-| puzzle | 3.392 | 1.952 | 0.58 |
-| triangl | 1.987 | 1.445 | 0.73 |
-| tak | 16.210 | 13.224 | 0.82 |
-| takl | 52.517 | 50.388 | 0.96 |
-| ntakl | 41.274 | 49.746 | 1.21 |
-| cpstak | 34.043 | 60.124 | 1.77 |
-| ctak | 15.429 | 11.891 | 0.77 |
-| fib | 6.126 | 5.514 | 0.90 |
-| fibc | 1.130 | 1.118 | 0.99 |
-| fibfp | 0.762 | 0.687 | 0.90 |
-| sum | 3.326 | 2.213 | 0.67 |
-| sumfp | 1.187 | 0.880 | 0.74 |
-| fft | 0.464 | 0.600 | 1.29 |
-| mbrot | 1.108 | 1.304 | 1.18 |
+| browse | 1.535 | 1.288 | 0.84 |
+| deriv | 1.617 | 1.832 | 1.13 |
+| destruc | 2.051 | 1.510 | 0.74 |
+| diviter | 1.415 | 1.012 | 0.72 |
+| divrec | 1.625 | 1.387 | 0.85 |
+| puzzle | 3.328 | 1.952 | 0.59 |
+| triangl | 2.002 | 1.445 | 0.72 |
+| tak | 16.342 | 13.224 | 0.81 |
+| takl | 52.196 | 50.388 | 0.97 |
+| ntakl | 42.363 | 49.746 | 1.17 |
+| cpstak | 34.293 | 60.124 | 1.75 |
+| ctak | 15.077 | 11.891 | 0.79 |
+| fib | 5.978 | 5.514 | 0.92 |
+| fibc | 1.110 | 1.118 | 1.01 |
+| fibfp | 0.733 | 0.687 | 0.94 |
+| sum | 3.153 | 2.213 | 0.70 |
+| sumfp | 1.108 | 0.880 | 0.79 |
+| fft | 0.450 | 0.600 | 1.33 |
+| mbrot | 1.183 | 1.304 | 1.10 |
 | mbrotZ | ERROR | 2.004 |  |
-| nucleic | 0.656 | 1.078 | 1.64 |
-| pi | 0.038 | 0.233 | 6.13 |
-| pnpoly | 2.339 | 1.468 | 0.63 |
-| ray | 0.816 | 1.172 | 1.44 |
-| simplex | 1.691 | 2.221 | 1.31 |
-| ack | 12.357 | 26.593 | 2.15 |
-| array1 | 2.333 | 1.562 | 0.67 |
-| string | 0.051 | 0.079 | 1.54 |
-| sum1 | 0.082 | 0.066 | 0.81 |
-| cat | 1.646 | 0.888 | 0.54 |
-| tail | 0.230 | 0.337 | 1.47 |
-| wc | 2.050 | 1.249 | 0.61 |
-| read1 | 0.061 | 0.160 | 2.64 |
-| compiler | 1.448 | 1.498 | 1.03 |
-| conform | 2.358 | 2.756 | 1.17 |
-| dynamic | 1.128 | 1.171 | 1.04 |
-| earley | 12.604 | 7.273 | 0.58 |
-| graphs | 14.972 | 18.449 | 1.23 |
-| lattice | 4.905 | 3.812 | 0.78 |
-| matrix | 1.893 | 2.001 | 1.06 |
+| nucleic | 0.662 | 1.078 | 1.63 |
+| pi | 0.038 | 0.233 | 6.11 |
+| pnpoly | 2.269 | 1.468 | 0.65 |
+| ray | 0.815 | 1.172 | 1.44 |
+| simplex | 1.631 | 2.221 | 1.36 |
+| ack | 12.343 | 26.593 | 2.15 |
+| array1 | 2.223 | 1.562 | 0.70 |
+| string | 0.047 | 0.079 | 1.67 |
+| sum1 | 0.081 | 0.066 | 0.82 |
+| cat | 1.458 | 0.888 | 0.61 |
+| tail | 0.220 | 0.337 | 1.53 |
+| wc | 1.612 | 1.249 | 0.77 |
+| read1 | 0.060 | 0.160 | 2.67 |
+| compiler | 1.328 | 1.498 | 1.13 |
+| conform | 2.298 | 2.756 | 1.20 |
+| dynamic | 1.094 | 1.171 | 1.07 |
+| earley | 11.441 | 7.273 | 0.64 |
+| graphs | 13.278 | 18.449 | 1.39 |
+| lattice | 4.862 | 3.812 | 0.78 |
+| matrix | 1.882 | 2.001 | 1.06 |
 | maze | 1.010 | 1.175 | 1.16 |
-| mazefun | 1.710 | 2.216 | 1.30 |
-| nqueens | 4.016 | 4.479 | 1.12 |
-| paraffins | 0.526 | 1.170 | 2.23 |
-| parsing | 2.376 | 7.146 | 3.01 |
-| peval | 2.620 | 2.510 | 0.96 |
-| primes | 0.676 | 0.782 | 1.16 |
-| quicksort | 2.559 | 2.431 | 0.95 |
-| scheme | 1.838 | 1.849 | 1.01 |
-| slatex | 1.229 | 1.295 | 1.05 |
-| chudnovsky | 0.106 | 0.073 | 0.69 |
-| nboyer | 10.637 | 8.198 | 0.77 |
-| sboyer | 11.463 | 9.398 | 0.82 |
-| gcbench | 24.131 | 12.572 | 0.52 |
-| mperm | 4.540 | 2.445 | 0.54 |
-| equal | 0.387 | 7.654 | 19.79 |
-| bv2string | 0.559 | 0.579 | 1.04 |
+| mazefun | 1.768 | 2.216 | 1.25 |
+| nqueens | 3.798 | 4.479 | 1.18 |
+| paraffins | 0.530 | 1.170 | 2.21 |
+| parsing | 2.290 | 7.146 | 3.12 |
+| peval | 2.579 | 2.510 | 0.97 |
+| primes | 0.660 | 0.782 | 1.19 |
+| quicksort | 2.517 | 2.431 | 0.97 |
+| scheme | 1.826 | 1.849 | 1.01 |
+| slatex | 1.143 | 1.295 | 1.13 |
+| chudnovsky | 0.102 | 0.073 | 0.72 |
+| nboyer | 10.202 | 8.198 | 0.80 |
+| sboyer | 11.531 | 9.398 | 0.82 |
+| gcbench | 7.134 | 12.572 | 1.76 |
+| mperm | 3.921 | 2.445 | 0.62 |
+| equal | 0.403 | 7.654 | 19.02 |
+| bv2string | 0.572 | 0.579 | 1.01 |
 
 ### What the numbers say about s2
 
