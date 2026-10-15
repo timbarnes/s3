@@ -17,6 +17,105 @@
 //!
 //! Flags: `--expand` prints each form's core AST (after macro expansion),
 //! and `--dis` its compiled code, before running it.
+//!
+//! # How s3 starts
+//!
+//! [`main`] starts one thread with a 1GB stack ([`STACK_SIZE`]), because
+//! the reader, the printer and `equal?` recurse over data. Everything else
+//! runs on that thread, in [`run_main`]. That function makes a
+//! [`Session`], reads the flags, and then chooses the REPL, `-e`, `-f`, a
+//! program or `--compile`.
+//!
+//! ## The session
+//!
+//! A [`Session`] holds the three things everything else needs:
+//!
+//! - the [`Heap`]: every Scheme object, the symbol table, the
+//!   environments and the libraries;
+//! - the [`Vm`](vm::Vm): the value and frame stacks and the dispatch loop
+//!   (`vm/machine.rs`);
+//! - `env`, the environment that forms are compiled for.
+//!
+//! The compiler is written in Scheme (`scheme/compiler/`), so it can't
+//! compile anything until compiled code for it has been loaded. That code
+//! is built into the binary as two *boot images*: compiled files that
+//! `scripts/rebuild-images.sh` makes and `boot/` holds (plan/09).
+//! [`Session::new`] builds the system in this order:
+//!
+//! 1. **The system environment**, at first holding only the core forms
+//!    (`quote`, `if`, `lambda`, `define`, ...) that the expander knows
+//!    ([`Env::with_core_forms`]) and the primitives written in Rust
+//!    ([`builtins::install`]).
+//! 2. **The VM**, with its stacks and the standard ports.
+//! 3. **The core image** ([`CORE_IMAGE`], from `scheme/core.scm`). Loading
+//!    it ([`fasl::read`]) restores the macros the file defined (`cond`,
+//!    `case`, `do`, ...), as they were when it was compiled. Running its
+//!    forms then defines the procedures written in Scheme (`map`,
+//!    `dynamic-wind`, ...). Nothing needs to be compiled, because both
+//!    the macros and the procedures are already compiled.
+//! 4. **The standard libraries** (`(scheme base)` and the rest, and
+//!    `(s3)`), registered as lists of the system environment's bindings
+//!    ([`libraries::register_standard_libraries`]).
+//! 5. **The compiler image** ([`COMPILER_IMAGE`]). It is one
+//!    `define-library`, `(s3 compiler)`, which imports the libraries from
+//!    step 4 and registers itself when it runs.
+//! 6. **Connecting the compiler.** The session keeps the compiler's
+//!    `expand` and `codegen` procedures. It rebinds `eval`, `%load-library`
+//!    and `dis`, which until now were placeholders, to the compiler's
+//!    versions, so code in Scheme compiles through the same compiler.
+//! 7. **The interaction environment**: a new environment that imports
+//!    every system binding. The REPL and programs work in it, so a
+//!    program's definitions never change the system environment.
+//!
+//! `S3_CORE_IMAGE` and `S3_COMPILER_IMAGE` name image files to use
+//! instead of the built-in ones in steps 3 and 5.
+//! `scripts/rebuild-images.sh` uses them to start each round from the
+//! images the previous round made.
+//!
+//! ## One form: read, compile, run
+//!
+//! The REPL, `-e` and `-f` all go through [`Session::eval_port`]. It
+//! loops over the input until it ends:
+//!
+//! 1. **Read** one datum ([`reader::parse`]): a Scheme value built on the
+//!    heap.
+//! 2. **Compile** it ([`Session::compile`]). Rust calls Scheme through
+//!    [`Vm::call`](vm::Vm::call). It calls `expand` with the datum and the
+//!    environment, which returns the form's core AST (as tagged vectors,
+//!    `scheme/compiler/ast.scm`). Then it calls `codegen` with the AST,
+//!    which returns a template: the bytecode and constants of a procedure
+//!    of no arguments. `codegen` builds the template with
+//!    `%make-template` (`compile/data.rs`), and the verifier
+//!    (`vm/verify.rs`) checks the template before the VM can run it.
+//! 3. **Run** the template ([`Vm::run`](vm::Vm::run)). It wraps the
+//!    template in a closure and runs the dispatch loop until that closure
+//!    returns. The REPL prints the value, or each of several values.
+//!
+//! An error that no handler catches ends only that form. It is reported
+//! with a backtrace ([`Session::report`]), the VM's stacks are cleared,
+//! and the loop goes on to the next form.
+//!
+//! The compiler runs on the same VM and heap as the program it compiles.
+//! This works because the VM is never running when Rust calls into it:
+//! the dispatch loop is not re-entrant, and every call starts at the top
+//! level. Collections happen only at safepoints inside the dispatch loop
+//! (plan/03 §4). A value that Rust holds while the VM runs must therefore
+//! be reachable from the roots. The arguments of `Vm::call` are, because
+//! they are its template's constants. Anything else goes on
+//! [`Heap::pinned`] until the run ends.
+//!
+//! ## Programs and compiled files
+//!
+//! [`Session::run_program`] runs a file. A program that starts with
+//! `import` is read whole and expanded as one body, by `expand-program`,
+//! so that the compiler can inline its small procedures. Any other file
+//! runs form by form, as the REPL would run it, but the first error ends
+//! the program with status 70.
+//!
+//! A compiled file (`.s3o`, written by `--compile`, [`fasl`]) skips the
+//! compiler. [`Session::run_compiled`] loads it and runs its templates.
+//! If the file needs a library that isn't loaded yet, the libraries are
+//! loaded first, through `%load-library`.
 
 mod builtins;
 mod compile;
@@ -46,6 +145,8 @@ use std::path::Path;
 /// larger alignment needs the aligned calls.
 struct Mimalloc;
 
+/// The alignment of every mimalloc block. Larger ones go through the
+/// `_aligned` calls.
 const MI_MAX_ALIGN: usize = 16;
 
 unsafe impl std::alloc::GlobalAlloc for Mimalloc {
@@ -76,6 +177,8 @@ unsafe impl std::alloc::GlobalAlloc for Mimalloc {
     }
 }
 
+/// Every allocation in s3, Rust's and the heap's, goes through
+/// [`Mimalloc`].
 #[global_allocator]
 static GLOBAL: Mimalloc = Mimalloc;
 
@@ -90,9 +193,12 @@ use value::Value;
 /// macros, compiled into the binary and loaded into every session.
 const CORE_SCM: &str = include_str!("../scheme/core.scm");
 
-/// The boot images (plan/09): `CORE_SCM` and the compiler, compiled by
-/// the compiler in Scheme. `scripts/rebuild-images.sh` remakes them.
+/// The first boot image (plan/09): [`CORE_SCM`] compiled by the compiler
+/// in Scheme, loaded into the system environment by [`Session::new`].
+/// `scripts/rebuild-images.sh` remakes both images.
 const CORE_IMAGE: &[u8] = include_bytes!("../boot/s3-core.s3o");
+/// The second boot image: the compiler, `(s3 compiler)`
+/// ([`compiler_source`]), compiled by itself.
 const COMPILER_IMAGE: &[u8] = include_bytes!("../boot/s3-compiler.s3o");
 
 /// The compiler in Scheme (plan/08), as the library `(s3 compiler)`: its
@@ -117,14 +223,20 @@ fn compiler_source() -> String {
     )
 }
 
-/// The heap, the VM, and the environment forms are compiled for.
+/// The heap, the VM, and the environment forms are compiled for. See the
+/// [module documentation](self) for how [`Session::new`] builds one.
 struct Session {
+    /// Every Scheme object, and the symbol table, environments and
+    /// libraries.
     heap: Heap,
     /// The interaction environment, except while `scheme/core.scm` loads
     /// into the system environment.
     env: GcRef,
+    /// The VM that runs every form, and the compiler too.
     vm: vm::Vm,
+    /// `--dis`: print each form's compiled code before it runs.
     dis: bool,
+    /// `--expand`: print each form's core AST before it is compiled.
     expand: bool,
     /// The compiler in Scheme's `expand` and `codegen`, once its image
     /// has loaded.
@@ -132,6 +244,12 @@ struct Session {
 }
 
 impl Session {
+    /// A session ready to compile and run forms in the interaction
+    /// environment: the system environment, the VM, the two boot images
+    /// and the standard libraries, in the order the [module
+    /// documentation](self#the-session) gives. It panics if an image named
+    /// by `S3_CORE_IMAGE` or `S3_COMPILER_IMAGE` can't be loaded; the
+    /// built-in images always load.
     fn new() -> Session {
         let mut heap = Heap::new();
         let core = Env::with_core_forms(&mut heap);
@@ -575,6 +693,8 @@ fn program_text(bytes: Vec<u8>) -> String {
 /// BSD's EX_SOFTWARE).
 const EXIT_ERROR: i32 = 70;
 
+/// Print the command line's form, for arguments [`run_main`] doesn't
+/// understand, and exit with status 2.
 fn usage() -> ! {
     eprintln!("usage: s3 [--expand] [--dis] [-e TEXT | -f FILE | PROGRAM [ARG ...] | --compile FILE [-o OUT]]");
     std::process::exit(2);
@@ -597,11 +717,34 @@ fn compile_to(session: &mut Session, file: &str, out: &Path) -> bool {
 /// address space, used only as deep as the data goes.
 const STACK_SIZE: usize = 1 << 30;
 
+/// Run [`run_main`] on a thread of its own with a [`STACK_SIZE`] stack,
+/// as the main thread's stack (8MB on macOS and Linux) is too small for
+/// deeply nested data, and wait for it. `run_main` always ends the process
+/// itself, through [`Session::exit`], so `main` returns only if it panics.
 fn main() {
     let session = std::thread::Builder::new().stack_size(STACK_SIZE).spawn(run_main).unwrap();
     session.join().unwrap();
 }
 
+/// The command line (see the [module documentation](self) for its forms):
+///
+/// 1. Make a [`Session`]. This loads the boot images, so the compiler is
+///    ready before any argument is looked at.
+/// 2. Take the leading flags, `--dis` and `--expand`, which apply to
+///    every mode.
+/// 3. Choose the mode from what is left:
+///    - nothing: the REPL, reading standard input through
+///      [`Session::eval_port`]. It prompts `s3> ` only when standard input
+///      is a terminal, so `s3 < file` and pipes run without prompts;
+///    - `-e TEXT`: the forms in `TEXT`, writing each result;
+///    - `-f FILE`: the forms in `FILE`, without writing results;
+///    - `--compile FILE [-o OUT]`: [`compile_to`];
+///    - `--core-image OUT` and `--compiler-image OUT`: write a new boot
+///      image (for `scripts/rebuild-images.sh`);
+///    - a file name: [`Session::run_program`], which never returns;
+///    - anything else: [`usage`].
+/// 4. Exit with status 0 if every form succeeded, and 1 if any failed.
+///    Output is flushed first ([`Session::exit`]).
 fn run_main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let mut session = Session::new();
