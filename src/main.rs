@@ -48,8 +48,9 @@
 //!    ([`builtins::install`]).
 //! 2. **The VM**, with its stacks and the standard ports.
 //! 3. **The core image** ([`CORE_IMAGE`], from `scheme/core.scm`). Loading
-//!    it ([`fasl::read`]) restores the macros the file defined (`cond`,
-//!    `case`, `do`, ...), as they were when it was compiled. Running its
+//!    it ([`fasl::read`]) restores the macros the file defined (`guard`,
+//!    `parameterize`, `define-record-type`, ...), as they were when it was
+//!    compiled. Running its
 //!    forms then defines the procedures written in Scheme (`map`,
 //!    `dynamic-wind`, ...). Nothing needs to be compiled, because both
 //!    the macros and the procedures are already compiled.
@@ -189,8 +190,11 @@ use io::PortKind;
 use reader::{ParseError, parse};
 use value::Value;
 
-/// The derived syntax (`cond`, `case`, `and`, `do`, …) as `syntax-rules`
-/// macros, compiled into the binary and loaded into every session.
+/// The derived syntax written as `syntax-rules` macros (`guard`,
+/// `parameterize`, `define-record-type`, …), and the standard procedures
+/// written in Scheme (`map`, `dynamic-wind`, …). `cond`, `case`, `do` and
+/// the other simple derived forms are the expander's own
+/// (`scheme/compiler/derived.scm`).
 const CORE_SCM: &str = include_str!("../scheme/core.scm");
 
 /// The first boot image (plan/09): [`CORE_SCM`] compiled by the compiler
