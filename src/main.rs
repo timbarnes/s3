@@ -22,23 +22,15 @@ mod builtins;
 mod compile;
 mod fasl;
 mod globals;
-// ponytail: the forked and foundation modules carry API that later phases
-// use (ports in P6, the GC mark in P3). Remove these allows as the callers
-// arrive.
-#[allow(dead_code)]
 #[cfg(feature = "gcstats")]
 mod gcstats;
 mod heap;
-#[allow(dead_code)]
 mod io;
 mod libraries;
 mod space;
-#[allow(dead_code)]
 mod printer;
 mod reader;
-#[allow(dead_code)]
 mod sstring;
-#[allow(dead_code)]
 mod value;
 mod vm;
 

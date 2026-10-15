@@ -142,16 +142,6 @@ impl Value {
         matches!(self.tag(), PAIR | CLOSURE | RECORD).then_some((self.0 & PAYLOAD) as *const u8)
     }
 
-    /// The value's bits, and the value with these bits: for `pairs.rs`'
-    /// free list only.
-    pub(crate) fn bits(self) -> u64 {
-        self.0
-    }
-
-    pub(crate) fn from_bits(bits: u64) -> Value {
-        Value(bits)
-    }
-
     pub fn as_fixnum(self) -> Option<i64> {
         // Sign-extend the 48-bit payload.
         (self.tag() == FIXNUM).then(|| ((self.0 << 16) as i64) >> 16)
