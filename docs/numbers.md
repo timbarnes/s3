@@ -48,7 +48,7 @@ Each comes in a floor version (quotient rounded toward negative infinity, remain
 
 * `(floor/ n1 n2)`, `(truncate/ n1 n2)`: two values, the quotient and the remainder.
 * `(floor-quotient n1 n2)`, `(floor-remainder n1 n2)`, `(truncate-quotient n1 n2)`, `(truncate-remainder n1 n2)`.
-* `quotient`, `remainder` and `modulo` are the older names for `truncate-quotient`, `truncate-remainder` and `floor-remainder`: `(modulo -7 2)` is `1`, `(remainder -7 2)` is `-1`.
+* `(quotient n1 n2)`, `(remainder n1 n2)`, `(modulo n1 n2)`: the older names of `truncate-quotient`, `truncate-remainder` and `floor-remainder`: `(modulo -7 2)` is `1`, `(remainder -7 2)` is `-1`.
 * `(gcd n ...)`, `(lcm n ...)`: non-negative. With no arguments they return `0` and `1`.
 
 ## Rounding
@@ -59,7 +59,9 @@ Each comes in a floor version (quotient rounded toward negative infinity, remain
 
 ## Exactness
 
-`(exact z)` returns the exact value of `z`. For a flonum that is the exact binary fraction it holds: `(exact 0.5)` is `1/2`, and `(exact 0.1)` is `3602879701896397/36028797018963968`. Infinities and NaNs have no exact value. `(inexact z)` returns the nearest flonum. The older names `inexact->exact` and `exact->inexact` are also defined.
+`(exact z)` returns the exact value of `z`. For a flonum that is the exact binary fraction it holds: `(exact 0.5)` is `1/2`, and `(exact 0.1)` is `3602879701896397/36028797018963968`. Infinities and NaNs have no exact value. `(inexact z)` returns the nearest flonum.
+
+* `(inexact->exact z)`, `(exact->inexact z)`: the older names of `exact` and `inexact`.
 
 ## Powers, roots and transcendental functions
 

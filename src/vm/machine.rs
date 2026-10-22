@@ -302,7 +302,7 @@ impl Vm {
         let n = args.len();
         let consts: Vec<Value> = std::iter::once(f).chain(args.iter().copied()).collect();
         let code = (0..=n as u32).map(Op::Const).chain([Op::TailCall(n as u16)]).collect();
-        let t = Template { name: "top-level".into(), required: 0, rest: false, nfree: 0, code, consts, local_names: Vec::new(), free_names: Vec::new(), lines: Vec::new() };
+        let t = Template { name: "top-level".into(), required: 0, rest: false, nfree: 0, code, consts, local_names: Vec::new(), free_names: Vec::new(), lines: Vec::new(), doc: None, position: None };
         let t = heap.template(t);
         self.run(heap, t)
     }

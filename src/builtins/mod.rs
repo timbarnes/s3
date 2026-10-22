@@ -126,6 +126,7 @@ pub fn install(heap: &mut Heap, env: &mut Env) {
         crate::libraries::PRIMITIVES,
         crate::compile::data::PRIMITIVES,
         crate::compile::prims::PRIMITIVES,
+        crate::help::PRIMITIVES,
     ] {
         for p in table {
             let v = heap.primitive(p);

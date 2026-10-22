@@ -13,6 +13,8 @@ What s3 provides beyond R7RS-small. It is deliberately little: s3 is a small, st
 * `(environment? obj)`: `#t` for an environment.
 * `(library-names)`, `(library-exports '(name ...))`: the registered libraries, and the names one exports. See [Libraries](./libraries.md#standard-libraries).
 * `(dis 'datum)`: prints the bytecode `datum` compiles to, without running it. See [Macros](./macros.md#inspecting-expansions).
+* `(help x)`: displays the documentation of `x`, a name or a procedure. For a standard name, that's its entry in this manual, with a link to it. For a procedure of your own, it's its signature, its docstring if it has one, and where it was defined. A docstring is a string at the start of a procedure's body with more forms after it: `(define (sq x) "The square of x." (* x x))`. See [Debugging](#debugging).
+* `(apropos "text")`: displays the names defined at the REPL, or imported there, that contain `text`.
 
 ## Command line
 

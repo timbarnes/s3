@@ -438,11 +438,17 @@
 
 ;; (lambda formals body ...). `formals` is a list of identifiers, possibly
 ;; improper, or one identifier for all the arguments.
+;; A string first in the body, with more forms after it, is the
+;; procedure's docstring (help).
 (define (lambda-form x name formals body-forms)
-  (lambda-node x name formals (lambda () (body x body-forms))))
+  (let* ((doc (and (pair? body-forms) (string? (car body-forms)) (pair? (cdr body-forms))
+                   (car body-forms)))
+         (l (lambda-node x name formals (lambda () (body x (if doc (cdr body-forms) body-forms))))))
+    (if doc (vector-set! l 5 doc))
+    l))
 
 ;; The lambda with those formals, whose body `make-body` expands inside
-;; the parameters' scope.
+;; the parameters' scope, defined at the current position.
 (define (lambda-node x name formals make-body)
   (let* ((parts (list-parts formals))
          (params (map-in-order (lambda (item)
@@ -460,7 +466,8 @@
             (if (memq (var-name (car vars)) seen)
                 (fail (string-append "lambda: duplicate parameter: " (show (var-name (car vars))))))
             (check (cons (var-name (car vars)) seen) (cdr vars)))))
-    (vector 'lambda name params rest (scoped x all make-body))))
+    (let ((position current-position))
+      (vector 'lambda name params rest (scoped x all make-body) #f position))))
 
 ;; (let ((v init) ...) body ...), or a named let.
 (define (let-form x items)

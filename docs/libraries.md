@@ -40,11 +40,11 @@ An imported name shares the library's variable, and can't be `set!`. `import` is
 
 Defines a library. Its body runs in a new environment that contains only what the library imports, and the library is registered under `library-name` once the body has run. The declarations are:
 
-* `(export spec ...)`: each `spec` is a name the library defines (or imports), or `(rename internal external)` to export it under another name.
-* `(import import-set ...)`: as for `import`. Importing one name with two different bindings is an error.
-* `(begin form ...)`: body forms.
-* `(include file ...)`, `(include-ci file ...)`: body forms read from files (`include-ci` folds case).
-* `(include-library-declarations file ...)`: further declarations read from files.
+* `export`: `(export spec ...)`, where each `spec` is a name the library defines (or imports), or `(rename internal external)` to export it under another name.
+* `import`: `(import import-set ...)`, as at top level. Importing one name with two different bindings is an error.
+* `begin`: `(begin form ...)`, body forms.
+* `include`, `include-ci`: `(include file ...)`, `(include-ci file ...)`, body forms read from files (`include-ci` folds case).
+* `include-library-declarations`: `(include-library-declarations file ...)`, further declarations read from files.
 
 ```scheme
 (define-library (example counter)
@@ -94,7 +94,7 @@ Evaluates the forms of the first clause whose requirement holds, in place of the
 
 * a feature identifier, true if it is in `(features)`;
 * `(library library-name)`: true if the library is registered or its file is on the search path (it isn't loaded);
-* `(and requirement ...)`, `(or requirement ...)`, `(not requirement)`.
+* a combination: `(and requirement ...)`, `(or requirement ...)` or `(not requirement)`.
 
 ```scheme
 (cond-expand

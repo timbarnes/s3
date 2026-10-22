@@ -434,6 +434,20 @@
      (lambda () (for-each (lambda (form) (eval form env)) (%read-file-forms filename)))
      %sources-close)))
 
+;;; Help (plan/12, T3): s3 extensions.
+
+;; (help 'name) or (help procedure): display its documentation: a
+;; procedure's docstring or signature, or the manual's entry for a
+;; standard name.
+(define (help x)
+  (write-string (%help-text x))
+  (newline))
+
+;; (apropos "text"): display the names defined in the interaction
+;; environment that contain `text`.
+(define (apropos text)
+  (for-each (lambda (name) (write name) (newline)) (%apropos text)))
+
 ;; exit runs the after thunks of every dynamic-wind it is inside, then
 ;; ends the process; emergency-exit doesn't.
 (define (exit . status)

@@ -136,7 +136,7 @@
     ((if) (vector 'if (split (if-test e)) (split (if-then e)) (split (if-else e))))
     ((seq) (vector 'seq (map split (seq-body e))))
     ((call) (make-call (split (call-fn e)) (map split (call-args e)) (node-position e)))
-    ((lambda) (vector 'lambda (lambda-name e) (lambda-params e) (lambda-rest e) (split (lambda-body e))))
+    ((lambda) (lambda-with-body e (split (lambda-body e))))
     ((let) (vector 'let (map (lambda (b) (cons (binding-var b) (split (binding-init b)))) (let-bindings e)) (split (let-body e))))
     ((letrec)
      (let* ((bindings (map (lambda (b) (cons (binding-var b) (split (binding-init b)))) (let-bindings e)))

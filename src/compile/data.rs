@@ -184,6 +184,8 @@ pub struct TemplateFields {
     pub local_names: Vec<String>,
     pub free_names: Vec<String>,
     pub lines: Vec<(u32, u64)>,
+    pub doc: Option<Box<str>>,
+    pub position: Option<u64>,
 }
 
 /// Make the template `f` describes, if it passes the verifier.
@@ -198,6 +200,8 @@ pub fn make_template(heap: &mut Heap, f: TemplateFields) -> Result<GcRef, String
         local_names: f.local_names,
         free_names: f.free_names,
         lines: f.lines,
+        doc: f.doc,
+        position: f.position,
     };
     verify(&t).map_err(|e| format!("%make-template: {}", e))?;
     Ok(heap.template(t))
@@ -232,6 +236,14 @@ fn template_fields(a: &[Value]) -> Result<TemplateFields, Error> {
         lines: match a.get(8) {
             Some(&v) => line_table(v)?,
             None => Vec::new(),
+        },
+        doc: match a.get(9) {
+            Some(&v) if v.is_true() => Some(string_value(v, "the docstring")?.into()),
+            _ => None,
+        },
+        position: match a.get(10) {
+            Some(&v) if v.is_true() => Some(v.as_fixnum().and_then(|n| u64::try_from(n).ok()).ok_or_else(|| err!("%make-template: bad position: {}", print_value(v)))?),
+            _ => None,
         },
     })
 }
@@ -270,8 +282,9 @@ pub fn inline_op(heap: &Heap, cell: GcRef, argc: usize) -> Option<Op> {
 
 pub static PRIMITIVES: &[Primitive] = &[
     // (%make-template name required rest? nfree #(instruction ...) #(constant ...)
-    //                 #(local-name ...) #(free-name ...) [#(ip position ...)])
-    prim("%make-template", 8, Some(9), |h, a| {
+    //                 #(local-name ...) #(free-name ...)
+    //                 [#(ip position ...) [docstring-or-#f [position-or-#f]]])
+    prim("%make-template", 8, Some(11), |h, a| {
         let fields = template_fields(a)?;
         Ok(Value::obj(make_template(h, fields)?))
     }),

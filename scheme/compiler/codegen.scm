@@ -65,12 +65,14 @@
   (let* ((e (split-letrecs e))
          (g (new-gen (boxed-variables e) (vector '()))))
     (gen-expr g e #t)
-    (finish g "top-level" 0 #f)))
+    (finish g "top-level" 0 #f #f #f)))
 
 ;; The template for what `g` has compiled: its code, constants, the names
 ;; of its slots (several names, joined by /, where sibling lets reuse a
-;; slot) and of its free variables, for the disassembler and backtraces.
-(define (finish g name required rest?)
+;; slot) and of its free variables, for the disassembler and backtraces,
+;; its line table, and the procedure's docstring and where it was
+;; defined, for help.
+(define (finish g name required rest? doc position)
   (let ((slot-names (map (lambda (names)
                            (if (null? names)
                                ""
@@ -82,7 +84,9 @@
                     (buffer->vector (gen-consts g))
                     (list->vector slot-names)
                     (buffer->vector (gen-free-names g))
-                    (buffer->vector (gen-lines g)))))
+                    (buffer->vector (gen-lines g))
+                    doc
+                    position)))
 
 ;; Record that the code just emitted pushed `n` values (popped, if
 ;; negative). Every emit is followed by one, so the depth is always the
@@ -437,7 +441,7 @@
             (loop (cdr free) (+ i 1)))))
     (set-gen-depth! inner (length vars))
     (gen-expr inner (lambda-body l) #t)
-    (finish inner (lambda-name l) (length (lambda-params l)) (and (lambda-rest l) #t))))
+    (finish inner (lambda-name l) (length (lambda-params l)) (and (lambda-rest l) #t) (lambda-doc l) (lambda-position l))))
 
 ;; Push a literal, with a dedicated instruction where there is one.
 (define (constant-op g v)

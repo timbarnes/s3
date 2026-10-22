@@ -4,6 +4,8 @@ R7RS: [section 6.6, Characters](https://standards.scheme.org/corrected-r7rs/r7rs
 
 Characters are Unicode scalar values. Literals: `#\a`, `#\λ`, `#\x3BB`, and the names `#\alarm`, `#\backspace`, `#\delete`, `#\escape`, `#\newline`, `#\null`, `#\return`, `#\space`, `#\tab`. All of these procedures are built in.
 
+* `(char? obj)`: `#t` for a character.
+
 ## Comparison
 
 `(char=? c1 c2 c3 ...)`, `(char<? ...)`, `(char>? ...)`, `(char<=? ...)`, `(char>=? ...)` compare by Unicode scalar value and take two or more arguments.

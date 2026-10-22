@@ -66,7 +66,7 @@ Each of these binds variables in a new region, then evaluates a body. A body may
   (even? 100))               ; => #t
 ```
 
-`letrec*` evaluates the inits left to right, each able to use the values of the variables bound before it. s3's `letrec` already behaves this way. In both, an init that uses the value of a variable not yet initialized is an error.
+`(letrec* ((var init) ...) body ...)` evaluates the inits left to right, each able to use the values of the variables bound before it. s3's `letrec` already behaves this way. In both, an init that uses the value of a variable not yet initialized is an error.
 
 ### Named `let`
 
@@ -83,7 +83,7 @@ Like `let`, but also binds `name` within the body to a procedure whose parameter
 
 ### `let-values`, `let*-values`
 
-`(let-values ((formals init) ...) body ...)`
+`(let-values ((formals init) ...) body ...)`, `(let*-values ((formals init) ...) body ...)`
 
 Each `init` returns as many values as `formals` describes, and they are bound to its variables. `formals` is a list `(a b)`, a dotted list `(a . rest)` or a single variable that receives all values as a list. `let-values` evaluates all the inits before binding anything; `let*-values` binds each in turn, so later inits see earlier variables.
 
@@ -157,9 +157,9 @@ The current ports are parameters, so `parameterize` can redirect output (see [In
 
 ## Quasiquote
 
-`` (quasiquote template) ``, or `` `template ``
+`(quasiquote template)`, or `` `template ``
 
-Builds list and vector structure from a template, like `quote`, except that parts marked with `,` (`unquote`) are evaluated and inserted, and parts marked with `,@` (`unquote-splicing`) are evaluated and their elements spliced in:
+Builds list and vector structure from a template, like `quote`, except that parts marked with `,` (`(unquote expr)`) are evaluated and inserted, and parts marked with `,@` (`(unquote-splicing expr)`) are evaluated and their elements spliced in:
 
 ```scheme
 `(1 ,(+ 1 1) ,@(list 3 4))          ; => (1 2 3 4)

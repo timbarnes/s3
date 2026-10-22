@@ -8,8 +8,8 @@ An environment is a set of top-level bindings that an expression can be evaluate
 
 s3's built-in procedures and special forms, and everything `scheme/core.scm` defines, live in the *system environment*. Programs, the REPL and loaded files run in the *interaction environment*, which imports every system binding. An imported name shares the system's variable, so:
 
-* `(define car ...)` at the REPL makes a new `car` for the interaction environment only. Procedures defined in `core.scm`, and code compiled before the `define`, keep using the system's `car`.
-* `(set! car ...)` is an error: an imported variable can only be assigned by its owner. Names the program defines itself can be `set!` as usual.
+* A `(define car ...)` at the REPL makes a new `car` for the interaction environment only. Procedures defined in `core.scm`, and code compiled before the `define`, keep using the system's `car`.
+* A `(set! car ...)` is an error: an imported variable can only be assigned by its owner. Names the program defines itself can be `set!` as usual.
 
 ## `environment`
 
@@ -24,7 +24,7 @@ Returns a new environment containing exactly the bindings of the [import sets](.
 
 ## `scheme-report-environment` and `null-environment`
 
-These are R5RS procedures that R7RS keeps in `(scheme r5rs)` for older code. `(scheme-report-environment 5)` returns an immutable environment containing the bindings of `(scheme r5rs)`, and `(null-environment 5)` one with only its syntactic keywords (`if`, `define`, `let`, ...). 5 is the only version accepted. New code should use `environment`.
+`(scheme-report-environment 5)`, `(null-environment 5)`: R5RS procedures that R7RS keeps in `(scheme r5rs)` for older code. The first returns an immutable environment containing the bindings of `(scheme r5rs)`, the second one with only its syntactic keywords (`if`, `define`, `let`, ...). 5 is the only version accepted. New code should use `environment`.
 
 ## `interaction-environment`
 

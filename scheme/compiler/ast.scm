@@ -11,7 +11,9 @@
 ;;; A call and a global-ref may have one more field, where they were read
 ;;; (plan/12, T2): a position, as %source-position gives it. Codegen
 ;;; records it for the code each one compiles to. Nodes made without one
-;;; are compiled at the position of the call they are inside.
+;;; are compiled at the position of the call they are inside. A lambda may
+;;; have two more (T3): its docstring and where it was defined, each #f
+;;; if unknown.
 ;;;
 ;;; Only this file indexes the vectors.
 
@@ -46,6 +48,11 @@
 (define (lambda-params n) (vector-ref n 2))
 (define (lambda-rest n) (vector-ref n 3))
 (define (lambda-body n) (vector-ref n 4))
+(define (lambda-doc n) (and (> (vector-length n) 5) (vector-ref n 5)))
+(define (lambda-position n) (and (> (vector-length n) 6) (vector-ref n 6)))
+;; A lambda node with `body` in place of `l`'s.
+(define (lambda-with-body l body)
+  (vector 'lambda (lambda-name l) (lambda-params l) (lambda-rest l) body (lambda-doc l) (lambda-position l)))
 ;; let and letrec
 (define (let-bindings n) (vector-ref n 1))
 (define (let-body n) (vector-ref n 2))

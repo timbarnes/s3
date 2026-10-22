@@ -39,8 +39,9 @@ The current input port is standard input even while a file is being loaded, so `
 
 ## Input
 
-Each takes an optional port, defaulting to the current input port (the byte procedures require a binary port). At end of input they return the eof object, which `(eof-object? obj)` tests for and `(eof-object)` returns.
+Each takes an optional port, defaulting to the current input port (the byte procedures require a binary port). At end of input they return the eof object.
 
+* `(eof-object)`, `(eof-object? obj)`: the eof object, and the test for it.
 * `(read [port])`: the next datum. Malformed input raises a `read-error?` error.
 * `(read-char [port])`, `(peek-char [port])`: the next character, consumed or not.
 * `(read-line [port])`: the characters up to the next line ending (`\n`, `\r` or `\r\n`), which is consumed but not returned.

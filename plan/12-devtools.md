@@ -4,7 +4,7 @@ Written 2026-10-22, for review before any code. It comes before native
 code (10), which is ready to start now that the memory work (11, G0-G3)
 is done.
 
-**Status:** T1 and T2 done 2026-10-22. Before it, a string before a body's
+**Status:** T1-T3 done 2026-10-22. Before it, a string before a body's
 internal definitions was made a docstring, dropped for now
 (`body-in-frame`, `scheme/compiler/expand.scm`); T3 stores it.
 
@@ -288,6 +288,57 @@ Both go in `(s3)` and are listed in `docs/extensions.md`.
 **Tests:** help for a built-in, a syntax keyword, a procedure with a
 docstring, one without (signature only), and one loaded from a compiled
 file. Also the coverage test above.
+
+### T3 results (2026-10-22)
+
+As planned, with these details:
+
+- **Docstrings** go on the lambda node, with where the procedure was
+  defined (the expander's current position): `lambda-doc`,
+  `lambda-position`. The analyzer and inliner rebuild lambdas with
+  `lambda-with-body`, which keeps both. `Template` has `doc` and
+  `position`, and `%make-template` takes them as optional arguments 10
+  and 11. Compiled files are version 4: T2's version 3 had been
+  committed, so a file written by it is refused rather than misread.
+  The boot images needed one round of reading version 3, as in T2.
+- **The manual is built in.** It's included with `include_str!` and parsed
+  on the first `help`, in `src/help.rs`. That's simpler than a build
+  step, and the binary grows by the manual's size: 2.00MB to 2.14MB.
+- **The extractor's rules.** A line, bullet or paragraph, that starts
+  with signatures (`` `(name ...)` ``, separated by commas) documents
+  each of those names. A paragraph of signatures alone also takes the
+  paragraph after it, since that's how the syntax is documented
+  (`` `(cond clause ...)` `` then its explanation). A name no line starts
+  with takes the first line that shows it. Among several lines that
+  start with a name, the first wins, in page order.
+- **What the coverage test found**, fixed in the docs: 51 names had no
+  entry. `caar` ... `cddddr` were described in words, now in three
+  bullets of signatures. `char?` was missing. `eof-object`,
+  `exact->inexact`, `quotient` and the like, `letrec*`, `let*-values`,
+  `string-ci<?` and the like, `quasiquote` and `unquote`, and the R5RS
+  environments were mentioned without signatures. Some bullets started
+  with signatures without documenting them. Those are the REPL notes
+  on `(define car ...)` and the `define-library` and `cond-expand`
+  declaration lists, which made `or` cond-expand's. They now start with
+  the keyword.
+- **Auxiliary syntax** (`else`, `=>`, `_`, `...`) has no signature, so
+  `help` shows the form it belongs to (`AUXILIARY` in `help.rs`).
+- **`help`** writes to the current output port (so it can be captured)
+  and returns nothing. A procedure without a docstring whose name is in
+  the manual, such as `map`, written in `core.scm`, gets the manual's
+  entry.
+- **Cost:** compile time 0.97-0.99x against T2.
+
+```
+> (help 'member)
+(memq obj list), (memv obj list), (member obj list [compare]): the first sublist of list whose car is obj, or #f. ...
+  Pairs and Lists, Searching: https://timbarnes.github.io/s3/pairs-and-lists/#searching
+> (define (sq x) "The square of x." (* x x))
+> (help sq)
+(sq x)
+  The square of x.
+  Defined at stdin:1.
+```
 
 ### T4. `trace` and `untrace`
 

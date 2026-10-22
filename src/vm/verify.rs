@@ -129,7 +129,7 @@ mod tests {
     use super::*;
 
     fn template(required: u16, code: Vec<Op>) -> Template {
-        Template { name: "t".into(), required, rest: false, nfree: 0, code, consts: Vec::new(), local_names: Vec::new(), free_names: Vec::new(), lines: Vec::new() }
+        Template { name: "t".into(), required, rest: false, nfree: 0, code, consts: Vec::new(), local_names: Vec::new(), free_names: Vec::new(), lines: Vec::new(), doc: None, position: None }
     }
 
     #[test]

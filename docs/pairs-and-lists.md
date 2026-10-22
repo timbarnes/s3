@@ -10,7 +10,9 @@ Procedures that take a list check that they got one: `length`, for example, rais
 
 * `(pair? obj)`, `(cons obj1 obj2)`, `(car pair)`, `(cdr pair)`.
 * `(set-car! pair obj)`, `(set-cdr! pair obj)`.
-* `caar`, `cadr`, `cdar`, `cddr`, and every combination up to four levels deep (`caddr`, `cdddr`, `cadddr`, `cddddr`, ...): `(cadr x)` is `(car (cdr x))`. The three- and four-level forms are in `(scheme cxr)`.
+* `(caar pair)`, `(cadr pair)`, `(cdar pair)`, `(cddr pair)`: compositions of `car` and `cdr`, read from the right: `(cadr x)` is `(car (cdr x))`.
+* `(caaar pair)`, `(caadr pair)`, `(cadar pair)`, `(caddr pair)`, `(cdaar pair)`, `(cdadr pair)`, `(cddar pair)`, `(cdddr pair)`: three levels deep, in `(scheme cxr)`.
+* `(caaaar pair)`, `(caaadr pair)`, `(caadar pair)`, `(caaddr pair)`, `(cadaar pair)`, `(cadadr pair)`, `(caddar pair)`, `(cadddr pair)`, `(cdaaar pair)`, `(cdaadr pair)`, `(cdadar pair)`, `(cdaddr pair)`, `(cddaar pair)`, `(cddadr pair)`, `(cdddar pair)`, `(cddddr pair)`: four levels deep, in `(scheme cxr)`.
 
 ## Lists
 

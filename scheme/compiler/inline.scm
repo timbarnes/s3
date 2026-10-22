@@ -151,7 +151,7 @@
        (vector 'if test then els)))
     ((seq) (vector 'seq (map-in-order walk (seq-body e))))
     ((lambda)
-     (vector 'lambda (lambda-name e) (lambda-params e) (lambda-rest e) (walk (lambda-body e))))
+     (lambda-with-body e (walk (lambda-body e))))
     ((let letrec)
      (let ((bindings (map-in-order (lambda (b) (cons (binding-var b) (walk (binding-init b)))) (let-bindings e))))
        (vector (node-tag e) bindings (walk (let-body e)))))

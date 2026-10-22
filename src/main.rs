@@ -125,6 +125,7 @@ mod globals;
 #[cfg(feature = "gcstats")]
 mod gcstats;
 mod heap;
+mod help;
 mod io;
 mod libraries;
 mod space;
@@ -1178,6 +1179,49 @@ mod tests {
         assert_eq!(s.vm.backtrace, ["f", "g"]);
     }
 
+    #[test]
+    fn help() {
+        // Every name the standard libraries export is in the manual.
+        let s = Session::new();
+        let mut missing = Vec::new();
+        for (name, _) in libraries::STANDARD_LIBRARIES {
+            let library = s.heap.libraries.get(&name.iter().map(|p| p.to_string()).collect()).unwrap();
+            for &(id, _) in &library.exports {
+                let id = printer::print_value(Value::obj(id));
+                if help::documented(&id).is_none() {
+                    missing.push(id);
+                }
+            }
+        }
+        assert!(missing.is_empty(), "no help for {:?}", missing);
+        let mut s = stressed_session();
+        let src = "(define (sq x)\n  \"The square of x.\"\n  (* x x))\n\
+                   (define (h a . r) a)\n\
+                   (define (shown thunk)\n\
+                     (let ((port (open-output-string)))\n\
+                       (parameterize ((current-output-port port)) (thunk))\n\
+                       (get-output-string port)))\n\
+                   (shown (lambda () (help 'sq) (help h)))\n\
+                   (shown (lambda () (help 'else)))\n\
+                   (shown (lambda () (help 5) (help 'nothing) (apropos \"string->s\")))";
+        let mut port = io::new_string_port_input(src);
+        let mut out = Vec::new();
+        while let Some(result) = s.compile_next(&mut port, "t.scm") {
+            out.push(result.and_then(|t| s.run_form(t)).map_or_else(|e| e, printer::display_value));
+        }
+        assert_eq!(out, [
+            "sq", "h", "shown",
+            "(sq x)\n  The square of x.\n  Defined at t.scm:1.\n(h a . r)\n  Defined at t.scm:4.\n",
+            &format!("else is auxiliary syntax of cond.\n{}\n", help::documented("cond").unwrap()),
+            "help: give a name, such as 'car, or a procedure, not 5\nnothing: not documented, and not defined.\nstring->symbol\n",
+        ]);
+        // A compiled file keeps docstrings and where procedures were defined.
+        let checks = "(let ((port (open-output-string))) (parameterize ((current-output-port port)) (help 'sq)) (get-output-string port))";
+        let compiled = run_compiled("(define (sq x)\n  \"The square of x.\"\n  (* x x))", checks).unwrap();
+        assert_eq!(compiled.len(), 1);
+        assert!(compiled[0].starts_with("\"(sq x)\\n  The square of x.\\n  Defined at /"), "{}", compiled[0]);
+    }
+
     /// Guards nested 8,000 deep, returning normally and re-raising through
     /// every level, make no full continuation captures (each guard costs
     /// constant time; with the reference implementation each would copy
@@ -1270,7 +1314,7 @@ mod tests {
         }
         let mut other = bytes.clone();
         other[8] = 99;
-        assert_eq!(fasl::read(&mut s.heap, s.env, &other).unwrap_err(), "compiled file is version 99, and this s3 reads version 3: compile it again");
+        assert_eq!(fasl::read(&mut s.heap, s.env, &other).unwrap_err(), "compiled file is version 99, and this s3 reads version 4: compile it again");
     }
 
     #[test]

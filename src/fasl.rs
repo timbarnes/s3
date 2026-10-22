@@ -63,7 +63,8 @@ const MAGIC: &[u8; 8] = b"s3fasl\r\n";
 /// 2: fixnums are 48-bit (NaN-boxed values), so a version 1 file can hold
 /// fixnums that no longer are.
 /// 3: templates have line tables (plan/12, T2).
-const VERSION: u32 = 3;
+/// 4: and docstrings and where they were defined (T3).
+const VERSION: u32 = 4;
 
 /// Whether `bytes` are a compiled file (of any version).
 pub fn is_fasl(bytes: &[u8]) -> bool {
@@ -382,23 +383,36 @@ impl Writer<'_> {
                     put_uint(&mut b, names.len() as u64);
                     names.iter().for_each(|n| put_str(&mut b, n));
                 }
-                // The line table: the files it names, then each entry as
-                // ip, file (an index into those) and line. Positions name
-                // files by a number only this process knows.
-                let places = t.lines.iter().map(|&(ip, p)| self.heap.sources.parts(p).map(|(file, line)| (ip, file, line))).collect::<Option<Vec<_>>>().ok_or("a template's line table names an unknown file")?;
+                // The files the positions name, then the line table, each
+                // entry as ip, file (an index into those) and line, then
+                // the docstring (empty for none) and where the procedure
+                // was defined (0, or the file's index + 1, and the line).
+                // Positions name files by a number only this process knows.
+                let unknown = || "a template names an unknown source file".to_string();
+                let places = t.lines.iter().map(|&(ip, p)| self.heap.sources.parts(p).map(|(file, line)| (ip, file, line))).collect::<Option<Vec<_>>>().ok_or_else(unknown)?;
+                let defined = t.position.map(|p| self.heap.sources.parts(p).ok_or_else(unknown)).transpose()?;
                 let mut files: Vec<&str> = Vec::new();
-                for &(_, file, _) in &places {
+                for file in places.iter().map(|&(_, file, _)| file).chain(defined.map(|(file, _)| file)) {
                     if !files.contains(&file) {
                         files.push(file);
                     }
                 }
+                let index = |file: &str| files.iter().position(|&f| f == file).unwrap() as u64;
                 put_uint(&mut b, files.len() as u64);
                 files.iter().for_each(|f| put_str(&mut b, f));
                 put_uint(&mut b, places.len() as u64);
                 for &(ip, file, line) in &places {
                     put_uint(&mut b, ip as u64);
-                    put_uint(&mut b, files.iter().position(|&f| f == file).unwrap() as u64);
+                    put_uint(&mut b, index(file));
                     put_uint(&mut b, line as u64);
+                }
+                put_str(&mut b, t.doc.as_deref().unwrap_or(""));
+                match defined {
+                    Some((file, line)) => {
+                        put_uint(&mut b, index(file) + 1);
+                        put_uint(&mut b, line as u64);
+                    }
+                    None => put_uint(&mut b, 0),
                 }
             }
             _ => return Err(format!("can't compile a constant {}", print_value(Value::obj(r)))),
@@ -904,7 +918,15 @@ fn read_unit(heap: &mut Heap, target: GcRef, bytes: &[u8]) -> Result<Loaded, Str
                     let line = r.uint()? as u32;
                     lines.push((ip, heap.sources.position(file, line)));
                 }
-                let t = Template { name, required, rest, nfree, code, consts, local_names, free_names, lines };
+                let doc = Some(r.str()?.into_boxed_str()).filter(|d| !d.is_empty());
+                let position = match r.uint()? as usize {
+                    0 => None,
+                    f => {
+                        let file = files.get(f - 1).ok_or(TRUNCATED)?;
+                        Some(heap.sources.position(file, r.uint()? as u32))
+                    }
+                };
+                let t = Template { name, required, rest, nfree, code, consts, local_names, free_names, lines, doc, position };
                 crate::vm::verify::verify(&t).map_err(|e| format!("compiled file: {}", e))?;
                 Value::obj(heap.template(t))
             }

@@ -14,7 +14,7 @@ Strings hold Unicode characters; indexes count characters, not bytes. String lit
 
 ## Comparison
 
-`(string=? s1 s2 s3 ...)`, `(string<? ...)`, `(string>? ...)`, `(string<=? ...)`, `(string>=? ...)` compare lexicographically by Unicode scalar value and take two or more arguments. `(string-ci=? ...)` and the other `-ci` forms compare after `string-foldcase`.
+`(string=? s1 s2 s3 ...)`, `(string<? ...)`, `(string>? ...)`, `(string<=? ...)`, `(string>=? ...)` compare lexicographically by Unicode scalar value and take two or more arguments. `(string-ci=? ...)`, `(string-ci<? ...)`, `(string-ci>? ...)`, `(string-ci<=? ...)` and `(string-ci>=? ...)` compare after `string-foldcase`.
 
 ## Case
 

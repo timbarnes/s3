@@ -205,6 +205,10 @@ pub struct Template {
     /// that instruction to the next pair's. Empty for code not compiled
     /// from source read from a file or the REPL.
     pub lines: Vec<(u32, u64)>,
+    /// The procedure's docstring, and where it was defined, for `help`
+    /// (plan/12, T3).
+    pub doc: Option<Box<str>>,
+    pub position: Option<u64>,
 }
 
 impl Template {

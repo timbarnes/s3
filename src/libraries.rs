@@ -116,7 +116,7 @@ impl Libraries {
 }
 
 /// `(scheme base)` and friends, from R7RS appendix A (s1's table).
-const STANDARD_LIBRARIES: &[(&[&str], &[&str])] = &[
+pub(crate) const STANDARD_LIBRARIES: &[(&[&str], &[&str])] = &[
     (&["scheme", "base"], &[
         "*", "+", "-", "...", "/", "<", "<=", "=", "=>", ">", ">=", "_", "abs", "and", "append", "apply",
         "assoc", "assq", "assv", "begin", "binary-port?", "boolean=?", "boolean?", "bytevector",
