@@ -224,7 +224,7 @@ const COMPILER_FILES: &[&str] = &[
 /// `(s3 compiler)`'s source: a `define-library` around `COMPILER_FILES`.
 fn compiler_source() -> String {
     format!(
-        "(define-library (s3 compiler) (export expand expand-program show-ast codegen eval-form load-library dis-form) (import (scheme base) (scheme cxr) (scheme repl) (scheme write) (s3)) (begin {}))",
+        "(define-library (s3 compiler) (export expand expand-program show-ast codegen eval-form load-library dis-form expand-form) (import (scheme base) (scheme cxr) (scheme repl) (scheme write) (s3)) (begin {}))",
         COMPILER_FILES.join("\n")
     )
 }
@@ -273,8 +273,8 @@ impl Session {
         s.scheme = Some((expand, codegen));
         // Every compile through the compiler in Scheme (plan/08, C6):
         // eval and %load-library, which load, imports and library files go
-        // through, and dis, become its own.
-        for (name, export) in [("eval", "eval-form"), ("%load-library", "load-library"), ("dis", "dis-form")] {
+        // through, and dis and expand, become its own.
+        for (name, export) in [("eval", "eval-form"), ("%load-library", "load-library"), ("dis", "dis-form"), ("expand", "expand-form")] {
             let f = s.library_procedure(&["s3", "compiler"], export);
             let name = s.heap.intern(name).as_ref().unwrap();
             let Some(globals::TopBinding::Variable(cell)) = env_of(system).borrow().lookup(name) else { unreachable!() };
@@ -1223,6 +1223,14 @@ mod tests {
     }
 
     #[test]
+    fn expand() {
+        // What a form expands to, as --expand shows it, without running it.
+        check("(define-syntax twice (syntax-rules () ((_ e) (+ e e)))) \
+               (let ((port (open-output-string))) (parameterize ((current-output-port port)) (expand '(twice (f 1)))) (get-output-string port))",
+              &["twice", "\"(+ (f 1) (f 1))\\n\""]);
+    }
+
+    #[test]
     fn trace() {
         let traced = |body: &str| format!(
             "(let ((port (open-output-string))) (parameterize ((current-error-port port)) (guard (e (#t #f)) {})) (get-output-string port))",
@@ -1231,9 +1239,10 @@ mod tests {
                        traced("(fact 2)"), traced("(fact 2)")),
               &["fact", "original", "", "\"(fact 2)\\n  (fact 1)\\n    (fact 0)\\n    => 1\\n  => 1\\n=> 2\\n\"", "", "#t", "\"\""]);
         // An error leaves the depth where it was.
-        check(&format!("(define (bad x) (car x)) (define (f) 1) (trace 'bad 'f) {} {} (untrace) (trace 'car)",
+        check(&format!("(define (bad x) (car x)) (define (f) 1) (trace 'bad 'f) {} {} (untrace) (trace 'car) (trace 'when) (trace 'nope)",
                        traced("(bad 1)"), traced("(f)")),
-              &["bad", "f", "", "\"(bad 1)\\n\"", "\"(f)\\n=> 1\\n\"", "", "error: trace: an imported procedure can't be traced: car"]);
+              &["bad", "f", "", "\"(bad 1)\\n\"", "\"(f)\\n=> 1\\n\"", "", "error: trace: an imported procedure can't be traced: car",
+                "error: trace: a macro, not a procedure: when", "error: trace: not defined: nope"]);
     }
 
     /// Guards nested 8,000 deep, returning normally and re-raising through

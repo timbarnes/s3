@@ -46,6 +46,12 @@
                   (cons #t (compile form env)))))
     (if (car result) (cdr result) (raise (cdr result)))))
 
+;; expand: expand a form for the interaction environment and print the
+;; core form it becomes, as --expand does, without running it.
+(define (expand-form datum)
+  (display (show-ast (expand datum (interaction-environment))))
+  (newline))
+
 ;; dis: compile a form for the interaction environment and print its
 ;; code, without running it.
 (define (dis-form datum)

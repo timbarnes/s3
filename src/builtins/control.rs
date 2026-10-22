@@ -16,6 +16,7 @@ pub static PRIMITIVES: &[Primitive] = &[
     // load-library (main.rs); these only hold their cells until then.
     prim("eval", 2, Some(2), |_, _| Err(err!("eval: the compiler isn't loaded"))),
     prim("dis", 1, Some(1), |_, _| Err(err!("dis: the compiler isn't loaded"))),
+    prim("expand", 1, Some(1), |_, _| Err(err!("expand: the compiler isn't loaded"))),
     prim("%load-library", 1, Some(1), |_, _| Err(err!("%load-library: the compiler isn't loaded"))),
     prim("procedure?", 1, Some(1), |_, a| {
         Ok(Value::bool(a[0].as_closure().is_some() || matches!(kind(a[0]), Some(Obj::Primitive(_) | Obj::Continuation { .. } | Obj::Escape { .. }))))

@@ -13,6 +13,7 @@ What s3 provides beyond R7RS-small. It is deliberately little: s3 is a small, st
 * `(environment? obj)`: `#t` for an environment.
 * `(library-names)`, `(library-exports '(name ...))`: the registered libraries, and the names one exports. See [Libraries](./libraries.md#standard-libraries).
 * `(dis 'datum)`: prints the bytecode `datum` compiles to, without running it. See [Macros](./macros.md#inspecting-expansions).
+* `(expand 'datum)`: prints the core form `datum` expands to, with every macro use expanded, without running it. See [Macros](./macros.md#inspecting-expansions).
 * `(help x)`: displays the documentation of `x`, a name or a procedure. For a standard name, that's its entry in this manual, with a link to it. For a procedure of your own, it's its signature, its docstring if it has one, and where it was defined. A docstring is a string at the start of a procedure's body with more forms after it: `(define (sq x) "The square of x." (* x x))`. See [Debugging](#debugging).
 * `(apropos "text")`: displays the names defined at the REPL, or imported there, that contain `text`.
 * `(trace 'name ...)`, `(untrace 'name ...)`: trace calls to the procedures those global variables hold, or stop. `(untrace)` stops them all. See [Debugging](#debugging).
@@ -60,6 +61,7 @@ s3> (fact 2)
 
 * only calls through the variable are traced. In a program that starts with `import`, the compiler may have inlined calls to a small procedure, and a loop's call to itself never goes through the variable;
 * only the program's own procedures can be traced: imported ones, such as `map`, can't be assigned;
+* a macro can't be traced: it has gone by the time the program runs. Calls its expansions make to traced procedures are traced, with their arguments' values. `(expand '(m ...))` shows what a use of `m` becomes;
 * a traced procedure's tail calls are no longer tail calls, so a traced loop uses memory for each iteration. Past 20 calls deep, the depth is shown as a number rather than by indentation.
 
 There is no stepping debugger. For a Scheme with those, see [s1](https://github.com/timbarnes/s1), whose debugger and tracer s3 doesn't share.

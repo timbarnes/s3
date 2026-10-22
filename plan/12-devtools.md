@@ -398,6 +398,10 @@ As planned, in `core.scm`, about 80 lines with comments:
   a number after that (`[823] (loop 2999177)`).
 - The backtrace of an error inside a traced procedure shows the
   tracer's `call-with-values` frames. That's left as it is.
+- **Added after review:** `(trace 'm)` for a macro said `m: syntax
+  used as a variable`, from inside `eval`. Now it's `trace: a macro, not
+  a procedure: m`. And `(expand 'form)`, beside `dis`, prints what a form
+  expands to, as `--expand` does (`expand-form`, `driver.scm`).
 
 ## Decisions
 

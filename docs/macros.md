@@ -94,4 +94,14 @@ $ s3 --expand -e '(let loop ((i 0)) (if (< i 3) (loop (+ i 1))))'
 ((letrec* ((loop.1 (named-lambda (loop i.2) (if (< i.2 3) (loop.1 (+ i.2 1)) #<unspecified>)))) loop.1) 0)
 ```
 
+`(expand 'datum)` (an s3 extension) prints the same for one form at the REPL, without running it:
+
+```
+s3> (define-syntax twice (syntax-rules () ((_ e) (+ e e))))
+s3> (expand '(twice (f 1)))
+(+ (f 1) (f 1))
+```
+
+Expanding a form makes the definitions in it known, as compiling it would: `(expand '(define-syntax m ...))` defines `m`.
+
 `--dis` prints the bytecode each form compiles to, and `(dis 'datum)` (an s3 extension) prints what `datum` would compile to, without running it: `(dis '(lambda (x) (+ x 1)))`.

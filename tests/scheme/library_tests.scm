@@ -81,7 +81,7 @@
     "library-names")
 ;; (s3) exports s3's own names, not the hidden definitions macros make
 ;; (define-record-type's field index is defined under an alias of `index`).
-(test-equal '(apropos define-library dis environment? help library-exports library-names port? trace untrace)
+(test-equal '(apropos define-library dis environment? expand help library-exports library-names port? trace untrace)
     (let loop ((names (library-exports '(s3))) (acc '()))
       (cond ((null? names) (reverse acc))
             ((char=? (string-ref (symbol->string (car names)) 0) #\%) (loop (cdr names) acc))
