@@ -30,6 +30,8 @@ pub enum PortKind {
         content: String,
         /// The byte offset of the next character.
         pos: Cell<usize>,
+        /// The line of the next character, from 1, for source positions.
+        line: Cell<u32>,
         /// Set by the `#!fold-case` directive (cleared by `#!no-fold-case`):
         /// the reader then folds identifiers and character names to lower
         /// case for the rest of this port.
@@ -129,7 +131,7 @@ impl PortKind {
     /// input or for any other kind of port.
     pub fn next_char_utf8(&mut self) -> Option<char> {
         match self {
-            PortKind::StringPortInput { content, pos, .. } => {
+            PortKind::StringPortInput { content, pos, line, .. } => {
                 let mut p = pos.get();
                 if p >= content.len() {
                     return None;
@@ -139,9 +141,18 @@ impl PortKind {
                 let ch = iter.next()?;
                 p += ch.len_utf8();
                 pos.set(p);
+                if ch == '\n' {
+                    line.set(line.get() + 1);
+                }
                 Some(ch)
             }
-            PortKind::Stdin => stdin_next_char(),
+            PortKind::Stdin => {
+                let ch = stdin_next_char();
+                if ch == Some('\n') {
+                    STDIN_STATE.with(|st| st.borrow_mut().line += 1);
+                }
+                ch
+            }
             _ => None,
         }
     }
@@ -152,9 +163,30 @@ impl PortKind {
     /// on this to look ahead without losing characters between datums.
     pub fn unread_char(&mut self, c: char) {
         match self {
-            PortKind::StringPortInput { pos, .. } => pos.set(pos.get() - c.len_utf8()),
-            PortKind::Stdin => STDIN_STATE.with(|st| st.borrow_mut().pushback.push(c)),
+            PortKind::StringPortInput { pos, line, .. } => {
+                pos.set(pos.get() - c.len_utf8());
+                if c == '\n' {
+                    line.set(line.get() - 1);
+                }
+            }
+            PortKind::Stdin => STDIN_STATE.with(|st| {
+                let mut st = st.borrow_mut();
+                st.pushback.push(c);
+                if c == '\n' {
+                    st.line -= 1;
+                }
+            }),
             _ => {}
+        }
+    }
+
+    /// The line of the next character to be read, counting from 1; 0 for
+    /// a port that doesn't count lines.
+    pub fn line(&self) -> u32 {
+        match self {
+            PortKind::StringPortInput { line, .. } => line.get(),
+            PortKind::Stdin => STDIN_STATE.with(|st| st.borrow().line + 1),
+            _ => 0,
         }
     }
 
@@ -185,6 +217,8 @@ struct StdinState {
     pushback: Vec<char>,
     /// Whether `#!fold-case` is in effect.
     fold_case: bool,
+    /// The newlines read so far.
+    line: u32,
 }
 
 thread_local! {
@@ -255,6 +289,7 @@ pub fn new_string_port_input(content: &str) -> PortKind {
     PortKind::StringPortInput {
         content: content.to_string(),
         pos: Cell::new(0),
+        line: Cell::new(1),
         fold_case: Cell::new(false),
     }
 }

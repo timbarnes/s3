@@ -36,9 +36,25 @@
 ;; forever into an error.
 (define max-nested-expansions 10000)
 
+;; Where the form being expanded was read, as %source-position gives
+;; it, or #f: that of the innermost form being expanded that was read as
+;; source. A macro's output wasn't, so it has the position of the macro's
+;; use. fail reports it.
+(define current-position #f)
+
+;; Run `thunk` with no current position, for a new top-level form, and
+;; put the outer one back after: a form can load a library, which
+;; expands its own forms meanwhile.
+(define (positioned thunk)
+  (let ((outer current-position))
+    (set! current-position #f)
+    (let ((result (thunk)))
+      (set! current-position outer)
+      result)))
+
 ;; Expand a top-level form for the environment `env`.
 (define (expand form env)
-  (expr (make-expander env '() 0 0 0 '()) form #t))
+  (positioned (lambda () (expr (make-expander env '() 0 0 0 '()) form #t))))
 
 ;; Enter a new scope with `bindings`, ((id . binding) ...), on entering a
 ;; binding form's body, and leave it again.
@@ -156,8 +172,19 @@
 ;;; Expressions
 
 ;; `top?` is true for a top-level form, or a begin at top level, where
-;; define and define-syntax define globally.
+;; define and define-syntax define globally. A form read as source sets
+;; the current position while it is expanded.
 (define (expr x form top?)
+  (let ((position (source-position form)))
+    (if position
+        (let ((outer current-position))
+          (set! current-position position)
+          (let ((node (expr-here x form top?)))
+            (set! current-position outer)
+            node))
+        (expr-here x form top?))))
+
+(define (expr-here x form top?)
   (cond ((identifier? form) (variable x form))
         ((head-core x form) => (lambda (c) (core x c form top?)))
         ((head-macro x form)
@@ -354,37 +381,49 @@
 ;; first expression; the second expands the definitions' values and the
 ;; expressions, with every definition in scope. A string among the
 ;; definitions, unless it is the last form, is a docstring and dropped.
+;; Each form is expanded at its own position, a definition's value too,
+;; though that is expanded later.
 (define (body-in-frame x forms)
-  (let loop ((pending forms) (defs '()))
-    (if (null? pending)
-        (fail "body: no expression after the definitions")
-        (let* ((form (expand-head x (car pending)))
-               (c (if (and (string? form) (pair? (cdr pending))) 'docstring (head-core x form))))
-          (case c
-            ((docstring) (loop (cdr pending) defs))
-            ((begin) (loop (append (cdr (items-of form)) (cdr pending)) defs))
-            ((include include-ci cond-expand)
-             (loop (append (spliced-forms x c (items-of form)) (cdr pending)) defs))
-            ((define)
-             (let ((d (definition (items-of form))))
-               (check-unbound-in-frame x (car d))
-               (let ((var (fresh x (car d))))
-                 (frame-bind! x (car d) (cons 'local (var-id var)))
-                 (loop (cdr pending) (cons (cons var (cdr d)) defs)))))
-            ((define-syntax)
-             (let ((items (items-of form)))
-               (if (not (and (= (length items) 3) (identifier? (cadr items))))
-                   (syntax-error "define-syntax" items))
-               (check-unbound-in-frame x (cadr items))
-               ;; The body's whole frame is the macro's scope.
-               (let ((m (transformer x (caddr items) (expander-nframes x))))
-                 (frame-bind! x (cadr items) (cons 'macro m))
-                 (loop (cdr pending) defs))))
-            (else
-             (let* ((bindings (map-in-order (lambda (d) (cons (car d) (definition-value x (var-name (car d)) (cdr d))))
-                                            (reverse defs)))
-                    (body (sequence x (cons form (cdr pending)) #f)))
-               (if (null? bindings) body (vector 'letrec bindings body)))))))))
+  (let ((outer current-position))
+    (let loop ((pending forms) (defs '()))
+      (if (null? pending)
+          (fail "body: no expression after the definitions")
+          (let ((position (or (source-position (car pending)) outer)))
+            (set! current-position position)
+            (let* ((form (expand-head x (car pending)))
+                   (c (if (and (string? form) (pair? (cdr pending))) 'docstring (head-core x form))))
+              (case c
+                ((docstring) (loop (cdr pending) defs))
+                ((begin) (loop (append (cdr (items-of form)) (cdr pending)) defs))
+                ((include include-ci cond-expand)
+                 (loop (append (spliced-forms x c (items-of form)) (cdr pending)) defs))
+                ((define)
+                 (let ((d (definition (items-of form))))
+                   (check-unbound-in-frame x (car d))
+                   (let ((var (fresh x (car d))))
+                     (frame-bind! x (car d) (cons 'local (var-id var)))
+                     (loop (cdr pending) (cons (list var position (cdr d)) defs)))))
+                ((define-syntax)
+                 (let ((items (items-of form)))
+                   (if (not (and (= (length items) 3) (identifier? (cadr items))))
+                       (syntax-error "define-syntax" items))
+                   (check-unbound-in-frame x (cadr items))
+                   ;; The body's whole frame is the macro's scope.
+                   (let ((m (transformer x (caddr items) (expander-nframes x))))
+                     (frame-bind! x (cadr items) (cons 'macro m))
+                     (loop (cdr pending) defs))))
+                (else
+                 (let* ((bindings (map-in-order (lambda (d)
+                                                  (set! current-position (cadr d))
+                                                  (cons (car d) (definition-value x (var-name (car d)) (caddr d))))
+                                                (reverse defs)))
+                        (first (begin (set! current-position position) (expr x form #f)))
+                        (rest (begin (set! current-position outer) (map-in-order (lambda (f) (expr x f #f)) (cdr pending))))
+                        (body (if (null? rest) first (vector 'seq (cons first rest)))))
+                   (if (null? bindings) body (vector 'letrec bindings body)))))))))))
+
+;; Where `form` was read, if it is a list read as source.
+(define (source-position form) (and (pair? form) (%source-position form)))
 
 ;; Fail if `name` is already defined in the innermost frame: a body that
 ;; defines the same name twice.

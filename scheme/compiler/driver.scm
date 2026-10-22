@@ -14,6 +14,9 @@
 ;; define-library among them is run when it is reached, so that the forms
 ;; after it can import it, as one loaded from a file would be.
 (define (expand-program forms env)
+  (positioned (lambda () (expand-program-forms forms env))))
+
+(define (expand-program-forms forms env)
   (let* ((x (make-expander env '() 0 0 0 '()))
          (nodes (map-in-order (lambda (form)
                                 (let ((node (expr x form #t)))

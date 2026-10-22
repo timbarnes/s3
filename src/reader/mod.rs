@@ -4,4 +4,4 @@ pub mod number_syntax;
 pub mod parser;
 pub mod tokenizer;
 
-pub use parser::{ParseError, parse};
+pub use parser::{ParseError, parse, parse_source};

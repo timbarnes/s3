@@ -180,6 +180,24 @@ pub static PRIMITIVES: &[Primitive] = &[
         let path = string_value(a[0], "%library-file-loaded?")?;
         Ok(Value::bool(h.libraries.is_loaded(Path::new(&path))))
     }),
+    // Source positions (plan/12, T1): (%source-position form) is where
+    // the list `form` was read, as a fixnum, or #f; (%position-string
+    // position) is that as "file:line". %sources-open and %sources-close
+    // bracket reading and compiling a unit of source, such as a file load
+    // loads; library files are bracketed by %library-compile-begin and -end.
+    prim("%source-position", 1, Some(1), |h, a| Ok(h.sources.lookup(a[0]).and_then(|p| Value::fixnum(p as i64)).unwrap_or(Value::FALSE))),
+    prim("%position-string", 1, Some(1), |h, a| {
+        let text = a[0].as_fixnum().and_then(|p| h.sources.describe(p as u64));
+        Ok(text.map_or(Value::FALSE, |t| h.string(&t)))
+    }),
+    prim("%sources-open", 0, Some(0), |h, _| {
+        h.sources.open();
+        Ok(Value::UNSPECIFIED)
+    }),
+    prim("%sources-close", 0, Some(0), |h, _| {
+        h.sources.close();
+        Ok(Value::UNSPECIFIED)
+    }),
     // (%read-forms file fold-case? who): every datum in a file, for include.
     prim("%read-forms", 3, Some(3), |h, a| {
         let (file, who) = (string_value(a[0], "%read-forms")?, string_value(a[2], "%read-forms")?);

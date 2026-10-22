@@ -37,8 +37,11 @@
 (define (sequence-parts v)
   (if (vector? v) (cons (vector->list v) '()) (list-parts v)))
 
-;; Fail the compile with the message `text`.
-(define (fail text) (error text))
+;; Fail the compile with the message `text`, after the current position
+;; (expand.scm) if there is one.
+(define (fail text)
+  (let ((where (and current-position (%position-string current-position))))
+    (error (if where (string-append where ": " text) text))))
 
 ;;; A transformer, as the matcher sees it.
 

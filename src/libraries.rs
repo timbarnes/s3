@@ -27,7 +27,7 @@ use crate::globals::{Env, TopBinding, cell_value, env_of};
 use crate::heap::{GcRef, Heap, Obj, list_to_vec};
 use crate::io::{PortKind, new_string_port_input};
 use crate::printer::print_value;
-use crate::reader::{ParseError, parse};
+use crate::reader::{ParseError, parse_source};
 use crate::value::Value;
 
 /// A library name, `(scheme base)`, as its parts: symbols, or exact
@@ -75,6 +75,7 @@ impl Libraries {
             env_of(heap.interaction.unwrap()).borrow_mut().touched = touched;
             heap.libraries.reading = reading;
         }
+        heap.sources.truncate(0);
     }
 
     /// Whether the library file `path` has been loaded.
@@ -377,7 +378,7 @@ pub fn read_file_forms(heap: &mut Heap, name: &str, fold_case: bool, who: &str) 
     }
     let mut forms = Vec::new();
     loop {
-        match parse(heap, &mut port) {
+        match parse_source(heap, &mut port, name) {
             Ok(form) => forms.push(form),
             Err(ParseError::Eof) => return Ok(forms),
             Err(ParseError::Syntax(e)) => return Err(format!("{}: {}: {}", who, name, e)),
@@ -558,6 +559,7 @@ pub static PRIMITIVES: &[Primitive] = &[
         let touched = env_of(target).borrow_mut().touched.replace(Vec::new());
         let reading = h.libraries.reading.replace(Vec::new());
         h.libraries.compiling.push((touched, reading));
+        h.sources.open();
         Ok(Value::UNSPECIFIED)
     }),
     // ...then (%library-compile-end path templates-or-#f) writes its
@@ -578,6 +580,7 @@ pub static PRIMITIVES: &[Primitive] = &[
         let (touched, reading) = h.libraries.compiling.pop().unwrap_or_default();
         env_of(target).borrow_mut().touched = touched;
         h.libraries.reading = reading;
+        h.sources.close();
         Ok(Value::UNSPECIFIED)
     }),
     prim("%read-library-file", 1, Some(1), |h, a| {

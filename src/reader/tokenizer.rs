@@ -100,6 +100,11 @@ impl<'a> Tokenizer<'a> {
         Tokenizer { port_kind }
     }
 
+    /// The line of the next character, for source positions.
+    pub fn line(&self) -> u32 {
+        self.port_kind.line()
+    }
+
     /// The next character, or `None` at end of input.
     fn read_char(&mut self) -> Option<char> {
         self.port_kind.next_char_utf8()

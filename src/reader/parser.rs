@@ -33,11 +33,23 @@ pub enum ParseError {
 
 /// Parse a single datum from `port_ref`.
 pub fn parse(heap: &mut Heap, port_ref: &mut PortKind) -> Result<Value, ParseError> {
+    read(heap, port_ref, None)
+}
+
+/// Parse a single datum of source code read from `file`, recording where
+/// each of its lists starts if a table is open (`crate::sources`).
+pub fn parse_source(heap: &mut Heap, port_ref: &mut PortKind, file: &str) -> Result<Value, ParseError> {
+    let file = heap.sources.recording().then(|| file.to_string());
+    read(heap, port_ref, file)
+}
+
+fn read(heap: &mut Heap, port_ref: &mut PortKind, file: Option<String>) -> Result<Value, ParseError> {
     let mut reader = Reader {
         tokens: Tokenizer::new(port_ref),
         heap,
         labels: HashMap::default(),
         deferred: None,
+        file,
     };
     let token = reader.next_datum_token()?;
     let datum = reader.datum(token)?;
@@ -57,6 +69,8 @@ struct Reader<'a, 'b> {
     labels: HashMap<u64, Value>,
     /// The first error found in a complete token; see the module docs.
     deferred: Option<String>,
+    /// The file being read, if positions are being recorded.
+    file: Option<String>,
 }
 
 impl Reader<'_, '_> {
@@ -165,6 +179,7 @@ impl Reader<'_, '_> {
 
     /// A list after its opening parenthesis, possibly dotted.
     fn list(&mut self, close: Token) -> Result<Value, ParseError> {
+        let line = self.tokens.line();
         let mut elems = Vec::new();
         let mut tail = Value::NIL;
         loop {
@@ -188,6 +203,12 @@ impl Reader<'_, '_> {
         }
         for elem in elems.into_iter().rev() {
             tail = self.heap.cons(elem, tail);
+        }
+        if let Some(file) = &self.file
+            && tail.as_pair().is_some()
+        {
+            let position = self.heap.sources.position(file, line);
+            self.heap.sources.record(tail, position);
         }
         Ok(tail)
     }

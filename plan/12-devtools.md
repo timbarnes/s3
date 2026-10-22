@@ -4,9 +4,9 @@ Written 2026-10-22, for review before any code. It comes before native
 code (10), which is ready to start now that the memory work (11, G0-G3)
 is done.
 
-**Status:** not started. One piece is done already: a string before a
-body's internal definitions is accepted as a docstring and dropped
-(`body-in-frame`, `scheme/compiler/expand.scm`). T3 stores it instead.
+**Status:** T1 done 2026-10-22. Before it, a string before a body's
+internal definitions was made a docstring, dropped for now
+(`body-in-frame`, `scheme/compiler/expand.scm`); T3 stores it.
 
 ## Why
 
@@ -94,6 +94,39 @@ error: prog.scm:14: define: only allowed at top level or at the start of a body:
 **Tests:** an error from a nested form in a file, from a macro's output
 (the use's line), and at the REPL. Also check that `read` in a program
 leaves the table empty.
+
+### T1 results (2026-10-22)
+
+As planned, with these details:
+
+- `src/sources.rs` holds the tables (`Heap::sources`). A position is a
+  file number and a line packed into a fixnum (`file << 24 | line`), so
+  the expander and, in T2, call nodes hold one value. File names live
+  for the process.
+- The tables are a stack. A program's or REPL form's table is open while
+  it is read and compiled. A library file's is open between
+  `%library-compile-begin` and `-end`, and `load`'s while it runs its
+  forms, which it holds. A lookup searches every open table, and
+  `include` records into the innermost, with the included file's name.
+  An error closes them all (`abandon_compiles`).
+- `parse_source` records; `parse`, which `read` uses, doesn't.
+- The REPL's file is `stdin` and `-e`'s is `-e`.
+- **Not in the plan:** `expr` isn't the only way into a form.
+  `body-in-frame` expands body forms' heads itself, and expands a
+  definition's value only after it has found all the definitions. So it
+  sets each form's position itself, and keeps each definition's position
+  for when its value is expanded.
+- **Compile time:** `bench/compile.sh --compare` against the commit
+  before: `repl` 0.97x, `chibi` 0.96x, `compiler` 1.00x. The `compiler`
+  case reads with `parse`, so it records nothing.
+- **Found, for T2:** an error in a form that `load` compiles is raised
+  inside `eval`, at run time. So its backtrace lists the compiler's
+  own procedures (`in if-form`, `in expr`, ...). That was already so
+  before T1.
+
+```
+error: p2.scm:5: let: bad binding: (y)
+```
 
 ### T2. Line tables in templates
 

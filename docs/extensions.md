@@ -29,7 +29,13 @@ error: unbound variable: h
   in f
 ```
 
-There is no debugger, tracer or source location in errors yet. For a Scheme with those, see [s1](https://github.com/timbarnes/s1), whose debugger and tracer s3 doesn't share.
+An error found while compiling code read from a file, or typed at the REPL, says where the form it is in was read. For a form a macro produced, that's where the macro was used:
+
+```
+error: prog.scm:14: define: only allowed at top level or at the start of a body: (define b 2)
+```
+
+There is no debugger or tracer yet. For a Scheme with those, see [s1](https://github.com/timbarnes/s1), whose debugger and tracer s3 doesn't share.
 
 ## Environment variables
 

@@ -187,6 +187,8 @@ pub struct Heap {
     /// its collections: a top-level form waiting to be expanded again
     /// after a library file it imports has been loaded.
     pub pinned: Vec<Value>,
+    /// Where the code being compiled was read (plan/12, T1).
+    pub sources: crate::sources::Sources,
     #[cfg(feature = "gcstats")]
     pub gc_stats: crate::gcstats::GcStats,
 }
@@ -215,6 +217,7 @@ impl Heap {
             interaction: None,
             libraries: Libraries::default(),
             pinned: Vec::new(),
+            sources: Default::default(),
             #[cfg(feature = "gcstats")]
             gc_stats: Default::default(),
         }

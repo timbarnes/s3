@@ -428,7 +428,11 @@
 
 (define (load filename . env)
   (let ((env (if (null? env) (interaction-environment) (car env))))
-    (for-each (lambda (form) (eval form env)) (%read-file-forms filename))))
+    ;; The file's positions are recorded while its forms are held.
+    (dynamic-wind
+     %sources-open
+     (lambda () (for-each (lambda (form) (eval form env)) (%read-file-forms filename)))
+     %sources-close)))
 
 ;; exit runs the after thunks of every dynamic-wind it is inside, then
 ;; ends the process; emergency-exit doesn't.

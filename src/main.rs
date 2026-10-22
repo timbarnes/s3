@@ -130,6 +130,7 @@ mod libraries;
 mod space;
 mod printer;
 mod reader;
+mod sources;
 mod sstring;
 mod value;
 mod vm;
@@ -187,7 +188,7 @@ use globals::{Env, env_of};
 use heap::GcRef;
 use heap::Heap;
 use io::PortKind;
-use reader::{ParseError, parse};
+use reader::{ParseError, parse, parse_source};
 use value::Value;
 
 /// The derived syntax written as `syntax-rules` macros (`guard`,
@@ -415,11 +416,31 @@ impl Session {
     /// Compile one top-level form and run it.
     fn eval(&mut self, datum: Value) -> Result<Value, String> {
         let template = self.compile(datum)?;
+        self.run_form(template)
+    }
+
+    /// Run a compiled top-level form.
+    fn run_form(&mut self, template: GcRef) -> Result<Value, String> {
         let result = self.vm.run(&mut self.heap, template);
         if result.is_err() {
             libraries::Libraries::abandon_compiles(&mut self.heap);
         }
         result
+    }
+
+    /// Read the next form from `port`, the source code of `file`, and
+    /// compile it, recording its positions until it is compiled
+    /// (`sources.rs`). `None` at the end of the input.
+    fn compile_next(&mut self, port: &mut PortKind, file: &str) -> Option<Result<GcRef, String>> {
+        let depth = self.heap.sources.depth();
+        self.heap.sources.open();
+        let template = match parse_source(&mut self.heap, port, file) {
+            Ok(datum) => Some(self.compile(datum)),
+            Err(ParseError::Eof) => None,
+            Err(ParseError::Syntax(msg)) => Some(Err(msg)),
+        };
+        self.heap.sources.truncate(depth);
+        template
     }
 
     /// Compile one top-level form, printing its AST and code for
@@ -502,10 +523,11 @@ impl Session {
     /// (R7RS 5.1), all read, as it is compiled as one body; of any other,
     /// only the first (or none), so that a script's forms are read as they
     /// run, as at the REPL.
-    fn read_program(&mut self, port: &mut PortKind) -> Result<Vec<Value>, String> {
+    /// Its positions are recorded if a table is open.
+    fn read_program(&mut self, port: &mut PortKind, file: &str) -> Result<Vec<Value>, String> {
         let mut forms = Vec::new();
         loop {
-            match parse(&mut self.heap, port) {
+            match parse_source(&mut self.heap, port, file) {
                 Ok(datum) => forms.push(datum),
                 Err(ParseError::Eof) => return Ok(forms),
                 Err(ParseError::Syntax(msg)) => return Err(msg),
@@ -531,20 +553,19 @@ impl Session {
         result
     }
 
-    /// Evaluate every form from `port`. Returns false if any form had an
-    /// error; an error is reported and evaluation continues with the next
-    /// form.
-    fn eval_port(&mut self, port: &mut PortKind, prompt: bool, write_results: bool) -> bool {
+    /// Evaluate every form from `port`, the source code of `file`. Returns
+    /// false if any form had an error; an error is reported and evaluation
+    /// continues with the next form.
+    fn eval_port(&mut self, port: &mut PortKind, file: &str, prompt: bool, write_results: bool) -> bool {
         let mut ok = true;
         loop {
             if prompt {
                 io::write_stdout(&self.heap, "s3> ");
                 std::io::stdout().flush().ok();
             }
-            let result = match parse(&mut self.heap, port) {
-                Ok(datum) => self.eval(datum),
-                Err(ParseError::Eof) => return ok,
-                Err(ParseError::Syntax(msg)) => Err(msg),
+            let result = match self.compile_next(port, file) {
+                Some(template) => template.and_then(|t| self.run_form(t)),
+                None => return ok,
             };
             match result {
                 Ok(v) if write_results => {
@@ -596,21 +617,30 @@ impl Session {
                 self.exit(EXIT_ERROR);
             }
         } else {
+            let file = &args[0];
             let mut port = io::new_string_port_input(&program_text(bytes));
-            let result = self.read_program(&mut port).and_then(|forms| match forms.first() {
+            let depth = self.heap.sources.depth();
+            self.heap.sources.open();
+            let result = self.read_program(&mut port, file).and_then(|forms| match forms.first() {
                 Some(&first) if self.is_form(first, "import") => {
                     let templates = self.compile_program(&forms)?;
+                    self.heap.sources.truncate(depth);
                     // Its libraries have run already.
                     self.run_templates(&templates.into_iter().filter(|&(_, library)| !library).map(|(t, _)| t).collect::<Vec<_>>())
                 }
-                _ => forms.into_iter().try_for_each(|datum| self.eval(datum).map(|_| ())).and_then(|()| loop {
-                    match parse(&mut self.heap, &mut port) {
-                        Ok(datum) => self.eval(datum)?,
-                        Err(ParseError::Eof) => break Ok(()),
-                        Err(ParseError::Syntax(msg)) => break Err(msg),
-                    };
-                }),
+                // A script: its first form, if any, then the rest, each
+                // read as it runs.
+                _ => {
+                    let first = forms.first().map(|&datum| self.compile(datum));
+                    self.heap.sources.truncate(depth);
+                    first.map_or(Ok(()), |t| self.run_form(t?).map(|_| ()))?;
+                    while let Some(template) = self.compile_next(&mut port, file) {
+                        self.run_form(template?)?;
+                    }
+                    Ok(())
+                }
             });
+            self.heap.sources.truncate(depth);
             if let Err(msg) = result {
                 self.report(&msg);
                 self.exit(EXIT_ERROR);
@@ -651,7 +681,9 @@ impl Session {
         let mut port = io::new_string_port_input(&program_text(bytes));
         env_of(self.env).borrow_mut().touched = Some(Vec::new());
         let pinned = self.heap.pinned.len();
-        let result = self.read_program(&mut port).and_then(|forms| {
+        let depth = self.heap.sources.depth();
+        self.heap.sources.open();
+        let result = self.read_program(&mut port, file).and_then(|forms| {
             if forms.first().is_some_and(|&first| self.is_form(first, "import")) {
                 let templates: Vec<GcRef> = self.compile_program(&forms)?.into_iter().map(|(t, _)| t).collect();
                 return fasl::write(&self.heap, self.env, &templates, &[file.into()]);
@@ -659,12 +691,18 @@ impl Session {
             let mut forms = forms.into_iter();
             let mut templates = Vec::new();
             loop {
-                let datum = match forms.next().map_or_else(|| parse(&mut self.heap, &mut port), Ok) {
+                if self.heap.sources.depth() == depth {
+                    self.heap.sources.open();
+                }
+                let datum = match forms.next().map_or_else(|| parse_source(&mut self.heap, &mut port, file), Ok) {
                     Ok(datum) => datum,
                     Err(ParseError::Eof) => break fasl::write(&self.heap, self.env, &templates, &[file.into()]),
                     Err(ParseError::Syntax(msg)) => break Err(msg),
                 };
-                let t = self.compile(datum)?;
+                let t = self.compile(datum);
+                // Each form's positions, only until it is compiled.
+                self.heap.sources.truncate(depth);
+                let t = t?;
                 self.heap.pinned.push(Value::obj(t));
                 templates.push(t);
                 // A library the program defines is registered now, so the
@@ -676,6 +714,7 @@ impl Session {
             }
         });
         self.heap.pinned.truncate(pinned);
+        self.heap.sources.truncate(depth);
         env_of(self.env).borrow_mut().touched = None;
         result
     }
@@ -763,15 +802,15 @@ fn run_main() {
     let ok = match args.as_slice() {
         [] => {
             let prompt = std::io::stdin().is_terminal();
-            let ok = session.eval_port(&mut PortKind::Stdin, prompt, true);
+            let ok = session.eval_port(&mut PortKind::Stdin, "stdin", prompt, true);
             if prompt {
                 io::write_stdout(&session.heap, "\n");
             }
             ok
         }
-        [flag, text] if flag == "-e" => session.eval_port(&mut io::new_string_port_input(text), false, true),
+        [flag, text] if flag == "-e" => session.eval_port(&mut io::new_string_port_input(text), "-e", false, true),
         [flag, file] if flag == "-f" => match std::fs::read_to_string(file) {
-            Ok(text) => session.eval_port(&mut io::new_string_port_input(&text), false, false),
+            Ok(text) => session.eval_port(&mut io::new_string_port_input(&text), file, false, false),
             Err(e) => {
                 eprintln!("s3: {}: {}", file, e);
                 false
@@ -1261,6 +1300,42 @@ mod tests {
               &["error: not a syntax-rules transformer: 5", "error: syntax-rules: only allowed as a macro's transformer: (syntax-rules ())",
                 "error: if: syntax used as a variable", "error: set!: can't assign to syntax: if"]);
         check("(let () (define-syntax m (syntax-rules () ((_) 1))) (define m 2) m)", &["error: define: duplicate definition: m"]);
+    }
+
+    /// Each form of `src`, read as the file t.scm, compiled and run: the
+    /// errors.
+    fn errors_in_file(s: &mut Session, src: &str) -> Vec<String> {
+        let mut port = io::new_string_port_input(src);
+        let mut errors = Vec::new();
+        while let Some(result) = s.compile_next(&mut port, "t.scm") {
+            if let Err(e) = result.and_then(|t| s.run_form(t)) {
+                errors.push(e);
+            }
+        }
+        errors
+    }
+
+    #[test]
+    fn compile_errors_have_positions() {
+        let mut s = stressed_session();
+        let src = "(define (f)\n  (define a 1)\n  (display a)\n  (define b 2)\n  b)\n\
+                   (define-syntax my-let (syntax-rules () ((_ v e) (let ((v)) e))))\n\
+                   (define (g x)\n  (my-let y\n    (+ x y)))\n\
+                   (define (h)\n  (define (k x x) 1)\n  (k 1 2))\n\
+                   (read (open-input-string \"(a b)\"))\n\
+                   (if)";
+        assert_eq!(errors_in_file(&mut s, src), [
+            "t.scm:4: define: only allowed at top level or at the start of a body: (define b 2)",
+            // A macro's output is at the line of the macro's use.
+            "t.scm:8: let: bad binding: (y)",
+            // A definition's value is expanded after the body's other definitions.
+            "t.scm:11: lambda: duplicate parameter: x",
+            "t.scm:14: if: bad syntax: (if)",
+        ]);
+        // Each form's table is closed once it is compiled.
+        assert_eq!(s.heap.sources.depth(), 0);
+        // Code that wasn't read as source has no position.
+        assert_eq!(run("(if)"), ["error: if: bad syntax: (if)"]);
     }
 
     #[test]
