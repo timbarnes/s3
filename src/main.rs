@@ -962,6 +962,9 @@ mod tests {
         check("(define (f) (define a 1) (display a) (define b 2) b)",
               &["error: define: only allowed at top level or at the start of a body: (define b 2)"]);
         check("(define (f) (define a 1))", &["error: body: no expression after the definitions"]);
+        // A docstring before internal definitions is dropped; a string as the last form is the value.
+        check("(define (f x) \"doc\" (define (g y) (* y 2)) (g x)) (f 3) (define (h) \"only\") (h)",
+              &["f", "6", "h", "\"only\""]);
         check("(define (f) (define a 1) (define a 2) a)", &["error: define: duplicate definition: a"]);
         check("(letrec ((a 1) (a 2)) a) (letrec ((a)) a)",
               &["error: letrec: duplicate variable: a", "error: letrec: bad binding: (a)"]);

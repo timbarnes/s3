@@ -37,7 +37,7 @@ At top level, `define` creates the variable if it doesn't exist and otherwise wo
 
 ### Internal definitions
 
-Definitions at the start of a body (of a `lambda`, `define`, `let` and the other binding forms) are local to that body. They behave like `letrec*`: they can refer to each other, and are evaluated in order.
+Definitions at the start of a body (of a `lambda`, `define`, `let` and the other binding forms) are local to that body. They behave like `letrec*`: they can refer to each other, and are evaluated in order. A string among them that isn't the body's last form is a docstring: it's ignored, so `(define (f) "Doc." (define x 1) x)` is allowed.
 
 ```scheme
 (define (f)

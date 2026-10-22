@@ -352,14 +352,16 @@
 ;; Two passes: the first finds the definitions (expanding each form's head
 ;; until it knows whether it is one, splicing begins), and stops at the
 ;; first expression; the second expands the definitions' values and the
-;; expressions, with every definition in scope.
+;; expressions, with every definition in scope. A string among the
+;; definitions, unless it is the last form, is a docstring and dropped.
 (define (body-in-frame x forms)
   (let loop ((pending forms) (defs '()))
     (if (null? pending)
         (fail "body: no expression after the definitions")
         (let* ((form (expand-head x (car pending)))
-               (c (head-core x form)))
+               (c (if (and (string? form) (pair? (cdr pending))) 'docstring (head-core x form))))
           (case c
+            ((docstring) (loop (cdr pending) defs))
             ((begin) (loop (append (cdr (items-of form)) (cdr pending)) defs))
             ((include include-ci cond-expand)
              (loop (append (spliced-forms x c (items-of form)) (cdr pending)) defs))
