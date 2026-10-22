@@ -8,6 +8,7 @@ template compose  arity 2
    2  MakeClosure k0   ; #<template>
    3  Return
 template (lambda)  arity 1  free 2
+      ; closures.scm:3
    0  FreeRef 0        ; f
    1  FreeRef 1        ; g
    2  LocalRef 0       ; x
@@ -27,6 +28,7 @@ template (lambda)  arity 1  free 1
    2  MakeClosure k0   ; #<template>
    3  Return
 template (lambda)  arity 1  free 2
+      ; closures.scm:6
    0  GlobalRef k0     ; +
    1  FreeRef 0        ; n
    2  FreeRef 1        ; a

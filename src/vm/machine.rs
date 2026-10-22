@@ -252,15 +252,30 @@ impl Vm {
         self.stack = Stack::new(size);
     }
 
-    /// The names of the procedures in the frame stack, innermost first,
-    /// leaving out anonymous ones and those of the exception machinery.
-    pub fn record_backtrace(&mut self) {
+    /// The procedures in the frame stack, innermost first, each with where
+    /// it was when it called the next or raised the error, if that is
+    /// known (plan/12, T2): `f (prog.scm:3)`. A frame's `ip` is one past
+    /// that instruction. Left out: the exception machinery, and anonymous
+    /// procedures and top-level forms whose place isn't known.
+    pub fn record_backtrace(&mut self, heap: &Heap) {
         self.backtrace = self
             .frames
             .iter()
             .rev()
-            .map(|f| parts(f.closure).0.name.to_string())
-            .filter(|n| !n.is_empty() && !n.starts_with('%') && !matches!(n.as_str(), "raise" | "raise-continuable" | "error" | "top-level"))
+            .filter_map(|f| {
+                let name = &*f.t.name;
+                if name.starts_with('%') || matches!(name, "raise" | "raise-continuable" | "error") {
+                    return None;
+                }
+                let place = f.ip.checked_sub(1).and_then(|ip| f.t.position_at(ip)).and_then(|p| heap.sources.describe(p));
+                match (name, place) {
+                    ("" | "top-level", None) => None,
+                    ("", Some(place)) => Some(format!("a lambda ({})", place)),
+                    ("top-level", Some(place)) => Some(format!("the top level ({})", place)),
+                    (name, Some(place)) => Some(format!("{} ({})", name, place)),
+                    (name, None) => Some(name.to_string()),
+                }
+            })
             .collect();
     }
 
@@ -287,7 +302,7 @@ impl Vm {
         let n = args.len();
         let consts: Vec<Value> = std::iter::once(f).chain(args.iter().copied()).collect();
         let code = (0..=n as u32).map(Op::Const).chain([Op::TailCall(n as u16)]).collect();
-        let t = Template { name: "top-level".into(), required: 0, rest: false, nfree: 0, code, consts, local_names: Vec::new(), free_names: Vec::new() };
+        let t = Template { name: "top-level".into(), required: 0, rest: false, nfree: 0, code, consts, local_names: Vec::new(), free_names: Vec::new(), lines: Vec::new() };
         let t = heap.template(t);
         self.run(heap, t)
     }

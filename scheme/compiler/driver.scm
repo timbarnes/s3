@@ -36,7 +36,15 @@
       (fail (string-append "eval: wrong number of arguments: " (number->string (length args)))))
   (if (not (environment? (cadr args)))
       (fail "eval: the second argument must be an environment"))
-  ((%template->procedure (compile (car args) (cadr args)))))
+  ((%template->procedure (compile-for-eval (car args) (cadr args)))))
+
+;; Compile a form for eval. A compile error is raised again from here,
+;; outside the compiler, so that its backtrace shows the program's
+;; procedures rather than the compiler's.
+(define (compile-for-eval form env)
+  (let ((result (guard (e (#t (cons #f e)))
+                  (cons #t (compile form env)))))
+    (if (car result) (cdr result) (raise (cdr result)))))
 
 ;; dis: compile a form for the interaction environment and print its
 ;; code, without running it.

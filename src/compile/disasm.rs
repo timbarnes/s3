@@ -7,25 +7,32 @@
 //! ```
 //!
 //! The templates of inner lambdas follow the template that makes their
-//! closures.
+//! closures. Where the code was read, if it is known, is shown before the
+//! first instruction compiled from each place (`; file:line`).
 
 use crate::globals::cell_name;
-use crate::heap::{GcRef, Obj};
+use crate::heap::{GcRef, Heap, Obj};
 use crate::printer::print_value;
 use crate::value::Value;
 use crate::vm::{Op, Template};
 
-pub fn disassemble(template: GcRef) -> String {
+pub fn disassemble(heap: &Heap, template: GcRef) -> String {
     let mut out = String::new();
-    template_into(&mut out, template);
+    template_into(heap, &mut out, template);
     out
 }
 
-fn template_into(out: &mut String, template: GcRef) {
+fn template_into(heap: &Heap, out: &mut String, template: GcRef) {
     let Obj::Template(t) = &template.get().kind else { unreachable!() };
     out.push_str(&header(t));
     let mut inner = Vec::new();
+    let mut lines = t.lines.iter().peekable();
     for (i, op) in t.code.iter().enumerate() {
+        if let Some(&(_, position)) = lines.next_if(|&&(at, _)| at as usize == i)
+            && let Some(place) = heap.sources.describe(position)
+        {
+            out.push_str(&format!("{:4}  ; {}\n", "", place));
+        }
         let constant = |k: u32| t.consts[k as usize];
         let name = |names: &[String], i: u16| names.get(i as usize).cloned().unwrap_or_default();
         let (text, note) = match *op {
@@ -65,7 +72,7 @@ fn template_into(out: &mut String, template: GcRef) {
         }
     }
     for r in inner {
-        template_into(out, r);
+        template_into(heap, out, r);
     }
 }
 

@@ -1,4 +1,5 @@
 template top-level
+      ; records.scm:3
    0  GlobalRef k0     ; %make-record-type
    1  Const k1         ; point
    2  Const k2         ; ((x point-x set-point-x!) (y point-y))
@@ -39,6 +40,7 @@ template top-level
   37  GlobalDefine k21 ; point-y
   38  Return
 template make-point  arity 2
+      ; records.scm:3
    0  GlobalRef k0     ; %record-new
    1  GlobalRef k1     ; point
    2  GlobalRef k2     ; indexes
@@ -46,17 +48,20 @@ template make-point  arity 2
    4  LocalRef 1       ; y
    5  TailCall 4
 template point?  arity 1
+      ; records.scm:3
    0  GlobalRef k0     ; %record?
    1  LocalRef 0       ; obj
    2  GlobalRef k1     ; point
    3  TailCall 2
 template point-x  arity 1
+      ; records.scm:3
    0  LocalRef 0       ; obj
    1  GlobalRef k0     ; point
    2  GlobalRef k1     ; index
    3  RecordRef
    4  Return
 template set-point-x!  arity 2
+      ; records.scm:3
    0  LocalRef 0       ; obj
    1  GlobalRef k0     ; point
    2  GlobalRef k1     ; index
@@ -64,6 +69,7 @@ template set-point-x!  arity 2
    4  RecordSet
    5  Return
 template point-y  arity 1
+      ; records.scm:3
    0  LocalRef 0       ; obj
    1  GlobalRef k0     ; point
    2  GlobalRef k1     ; index

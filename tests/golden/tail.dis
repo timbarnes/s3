@@ -3,6 +3,7 @@ template top-level
    1  GlobalDefine k1  ; loop
    2  Return
 template loop  arity 2
+      ; tail.scm:3
    0  LocalRef 0       ; n
    1  JumpIfNotImm NumEq 0 →4
    2  LocalRef 1       ; acc
@@ -18,6 +19,7 @@ template top-level
    1  GlobalDefine k1  ; f
    2  Return
 template f  arity 1
+      ; tail.scm:4
    0  LocalRef 0       ; g
    1  Fixnum 1
    2  Call 1

@@ -118,7 +118,7 @@
                          (lambda (var)
                            (let* ((els (rest))
                                   (f (expr x (caddr clause) #f)))
-                             (vector 'if (local-node var) (vector 'call f (list (local-node var))) els)))))
+                             (vector 'if (local-node var) (make-call f (list (local-node var)) current-position) els)))))
               ((= n 1)
                (if more?
                    ;; (let ((temp test)) (if temp temp (cond ...)))
@@ -170,7 +170,7 @@
              (arrow? (and (= n 3) (literal-is? x arrow-b (cadr clause))))
              (rest (lambda () (if more? (loop (cdr clauses) #f #f) unspecified-node))))
         (cond ((and (not more?) (>= n 2) (literal-is? x else-b (car clause)))
-               (cond (arrow? (let ((f (expr x (caddr clause) #f))) (vector 'call f (list (key-node)))))
+               (cond (arrow? (let ((f (expr x (caddr clause) #f))) (make-call f (list (key-node)) current-position)))
                      (in-body? (body x (cdr clause)))
                      (else (begin-form x clause top?))))
               ((not (list? (car clause))) (no-rule-matches (shown clauses)))
@@ -180,7 +180,7 @@
                (let* ((els (rest))
                       (test (atoms-test (%strip-datum (car clause)) key-node memv-cell eq-cell))
                       (then (if arrow?
-                                (let ((f (expr x (caddr clause) #f))) (vector 'call f (list (key-node))))
+                                (let ((f (expr x (caddr clause) #f))) (make-call f (list (key-node)) current-position))
                                 (sequence x (cdr clause) #f))))
                  (vector 'if test then els))))))))
 

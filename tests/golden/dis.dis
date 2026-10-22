@@ -1,4 +1,5 @@
 template top-level
+      ; dis.scm:2
    0  GlobalRef k0     ; dis
    1  Const k1         ; (+ 2 3)
    2  TailCall 1
@@ -7,6 +8,7 @@ template top-level
    1  AddImm 3
    2  Return
 template top-level
+      ; dis.scm:3
    0  GlobalRef k0     ; dis
    1  Const k1         ; (if (< x 20) (+ x 1) 0)
    2  TailCall 1

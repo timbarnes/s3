@@ -10,6 +10,7 @@ template make-counter  arity 0
    4  Return
 template (lambda)  arity 0  free 1
    0  FreeRef 0        ; n
+      ; set.scm:5
    1  FreeRef 0        ; n
    2  BoxRef
    3  AddImm 1
@@ -26,6 +27,7 @@ template top-level
 template f  arity 2
    0  MakeBox 0        ; x
    1  LocalRef 0       ; x
+      ; set.scm:6
    2  LocalRef 0       ; x
    3  BoxRef
    4  AddImm 1

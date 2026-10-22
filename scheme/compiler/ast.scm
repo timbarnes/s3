@@ -8,6 +8,11 @@
 ;;;   #(let ((var . init) ...) body)       #(letrec ((var . init) ...) body)
 ;;;   #(var id name)          a binding occurrence: its number, and its name
 ;;;
+;;; A call and a global-ref may have one more field, where they were read
+;;; (plan/12, T2): a position, as %source-position gives it. Codegen
+;;; records it for the code each one compiles to. Nodes made without one
+;;; are compiled at the position of the call they are inside.
+;;;
 ;;; Only this file indexes the vectors.
 
 ;; A node's tag (const, local-ref, call ...), and then the accessors of
@@ -30,6 +35,13 @@
 (define (seq-body n) (vector-ref n 1))
 (define (call-fn n) (vector-ref n 1))
 (define (call-args n) (vector-ref n 2))
+;; call and global-ref: where it was read, or #f.
+(define (node-position n)
+  (let ((i (if (eq? (node-tag n) 'call) 3 2)))
+    (and (> (vector-length n) i) (vector-ref n i))))
+;; A call node, at `position` if it isn't #f.
+(define (make-call f args position)
+  (if position (vector 'call f args position) (vector 'call f args)))
 (define (lambda-name n) (vector-ref n 1))
 (define (lambda-params n) (vector-ref n 2))
 (define (lambda-rest n) (vector-ref n 3))

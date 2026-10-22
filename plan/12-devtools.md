@@ -4,7 +4,7 @@ Written 2026-10-22, for review before any code. It comes before native
 code (10), which is ready to start now that the memory work (11, G0-G3)
 is done.
 
-**Status:** T1 done 2026-10-22. Before it, a string before a body's
+**Status:** T1 and T2 done 2026-10-22. Before it, a string before a body's
 internal definitions was made a docstring, dropped for now
 (`body-in-frame`, `scheme/compiler/expand.scm`); T3 stores it.
 
@@ -179,6 +179,59 @@ that the golden `dis` listings change only by the added lines.
 - **Benchmarks.** There's no run-time cost: the tables are read only on
   an error. Measure compile time and the boot images' size anyway, and
   record them here.
+
+### T2 results (2026-10-22)
+
+As planned, with these changes:
+
+- **Global references have positions too.** `unbound variable` is raised
+  by `global-ref`, not by a call, and is one of the commonest errors.
+  So `global-ref` nodes, like calls, may carry a position. Calls `cond`'s
+  `=>` and `case` build in `derived.scm` get the derived form's position.
+- **The position is an optional last field.** A node made without one
+  is compiled at the position of the call it's inside, so the places
+  that build nodes and don't care needn't change. The ones that rebuild
+  calls had to keep it: `split-letrecs`, which codegen runs first, and
+  the inliner's walk and copy (`make-call`, `node-position` in
+  `ast.scm`).
+- **No file per template.** A position names its file, so an inlined
+  body or an included file's code keeps the right file. The inliner
+  question in the plan doesn't arise.
+- **Codegen** tracks the innermost position, and `emit` records a change.
+  It never records "unknown": code outside every positioned node (a
+  `begin`'s `pop`s) can't raise an error. `Template::lines` is
+  `Vec<(ip, position)>`. `%make-template` takes it as an optional ninth
+  argument, so the old compiler image could still build the new one.
+- **Compiled files** are version 3. Each template lists the files its
+  line table names, then `(ip, file, line)` entries, since a position's
+  file number is only meaningful in one process. Rebuilding the images
+  needed the binary to read version 2 for one round (the images' line
+  tables are empty, so nothing was lost), as `rebuild-images.sh` says.
+- **Backtraces**, as planned: `in g (prog.scm:3)`, `in a lambda (...)`,
+  `in the top level (...)`. A frame's `ip` is one past the instruction
+  that called or raised, so the position is that of `ip - 1`. A tail
+  call leaves no frame, so a procedure or top-level form that ended in a
+  tail call isn't shown.
+- **`eval`'s compile errors** are caught and raised again outside the
+  compiler (`compile-for-eval`, `driver.scm`), so a form `load` compiles
+  no longer shows the compiler's procedures in its backtrace.
+- **`dis`** prints `; file:line` before the first instruction from each
+  place. The golden test runs `s3` in `tests/golden`, so the listings say
+  `begin.scm:2`, not a path on one machine. The listings changed only by
+  those lines.
+- **Cost:** run time unchanged (`bench/bench.sh`, every workload 1.00x).
+  Compile time, `bench/compile.sh` against T1: `repl` 0.97x, `chibi`
+  0.96x. T1 and T2 together: 0.92-0.93x. Before codegen stopped making a
+  closure per call node it was 0.90-0.91x. The boot images' line tables
+  are empty, so they didn't grow.
+
+```
+error: car: expected a pair, got 3
+  in g (prog.scm:3)
+  in loop
+```
+
+The `in loop`s are `map`'s, from `core.scm`, which has no positions.
 
 ### T3. Docstrings, `help` and `apropos`
 

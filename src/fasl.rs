@@ -62,7 +62,8 @@ const MAGIC: &[u8; 8] = b"s3fasl\r\n";
 ///
 /// 2: fixnums are 48-bit (NaN-boxed values), so a version 1 file can hold
 /// fixnums that no longer are.
-const VERSION: u32 = 2;
+/// 3: templates have line tables (plan/12, T2).
+const VERSION: u32 = 3;
 
 /// Whether `bytes` are a compiled file (of any version).
 pub fn is_fasl(bytes: &[u8]) -> bool {
@@ -380,6 +381,24 @@ impl Writer<'_> {
                 for names in [&t.local_names, &t.free_names] {
                     put_uint(&mut b, names.len() as u64);
                     names.iter().for_each(|n| put_str(&mut b, n));
+                }
+                // The line table: the files it names, then each entry as
+                // ip, file (an index into those) and line. Positions name
+                // files by a number only this process knows.
+                let places = t.lines.iter().map(|&(ip, p)| self.heap.sources.parts(p).map(|(file, line)| (ip, file, line))).collect::<Option<Vec<_>>>().ok_or("a template's line table names an unknown file")?;
+                let mut files: Vec<&str> = Vec::new();
+                for &(_, file, _) in &places {
+                    if !files.contains(&file) {
+                        files.push(file);
+                    }
+                }
+                put_uint(&mut b, files.len() as u64);
+                files.iter().for_each(|f| put_str(&mut b, f));
+                put_uint(&mut b, places.len() as u64);
+                for &(ip, file, line) in &places {
+                    put_uint(&mut b, ip as u64);
+                    put_uint(&mut b, files.iter().position(|&f| f == file).unwrap() as u64);
+                    put_uint(&mut b, line as u64);
                 }
             }
             _ => return Err(format!("can't compile a constant {}", print_value(Value::obj(r)))),
@@ -876,7 +895,16 @@ fn read_unit(heap: &mut Heap, target: GcRef, bytes: &[u8]) -> Result<Loaded, Str
                     (0..n).map(|_| r.str()).collect()
                 };
                 let (local_names, free_names) = (names()?, names()?);
-                let t = Template { name, required, rest, nfree, code, consts, local_names, free_names };
+                let files = names()?;
+                let n = r.small()?;
+                let mut lines = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let ip = r.uint()? as u32;
+                    let file = files.get(r.uint()? as usize).ok_or(TRUNCATED)?;
+                    let line = r.uint()? as u32;
+                    lines.push((ip, heap.sources.position(file, line)));
+                }
+                let t = Template { name, required, rest, nfree, code, consts, local_names, free_names, lines };
                 crate::vm::verify::verify(&t).map_err(|e| format!("compiled file: {}", e))?;
                 Value::obj(heap.template(t))
             }

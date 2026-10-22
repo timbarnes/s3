@@ -208,7 +208,9 @@
   (let ((b (resolve x id)))
     (case (car b)
       ((local) (vector 'local-ref (cdr b)))
-      ((global) (vector 'global-ref (%env-cell (cddr b) (cadr b))))
+      ((global) (if current-position
+                    (vector 'global-ref (%env-cell (cddr b) (cadr b)) current-position)
+                    (vector 'global-ref (%env-cell (cddr b) (cadr b)))))
       (else (fail (string-append (show id) ": syntax used as a variable"))))))
 
 ;; Expand a use of the core form `c` (quote, lambda, define, if, let ...,
@@ -486,7 +488,7 @@
                        (lambda ()
                          (let ((l (lambda-form x (show name) formals (cdddr items))))
                            (vector 'letrec (list (cons var l)) (vector 'local-ref (var-id var))))))))
-    (vector 'call proc inits)))
+    (make-call proc inits current-position)))
 
 ;; letrec* and letrec, which R7RS allows to be the same.
 (define (letrec-form x keyword items)
@@ -535,7 +537,7 @@
 (define (call x form)
   (let* ((items (items-of form))
          (f (expr x (car items) #f)))
-    (vector 'call f (map-in-order (lambda (a) (expr x a #f)) (cdr items)))))
+    (make-call f (map-in-order (lambda (a) (expr x a #f)) (cdr items)) current-position)))
 
 ;;; Quasiquote: the template as calls to cons, append and list->vector.
 ;;; Parts with no unquote in them are constants.

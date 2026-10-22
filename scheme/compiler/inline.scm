@@ -142,7 +142,7 @@
                   ;; `assigned` doesn't know them.
                   (body (inline-calls x copy procs (append (assigned-in copy) assigned) (cons (car proc) active))))
              (if (null? bound) body (vector 'let bound body)))
-           (vector 'call (walk f) args))))
+           (make-call (walk f) args (node-position e)))))
     ((const local-ref global-ref) e)
     ((local-set) (vector 'local-set (local-set-id e) (walk (local-set-value e))))
     ((global-define global-set) (vector (node-tag e) (global-cell e) (walk (global-value e))))
@@ -185,7 +185,7 @@
     ((global-set) (vector 'global-set (global-cell e) (copy (global-value e))))
     ((if) (vector 'if (copy (if-test e)) (copy (if-then e)) (copy (if-else e))))
     ((seq) (vector 'seq (map-in-order copy (seq-body e))))
-    ((call) (vector 'call (copy (call-fn e)) (map-in-order copy (call-args e))))
+    ((call) (make-call (copy (call-fn e)) (map-in-order copy (call-args e)) (node-position e)))
     ((let)
      (let* ((inits (map-in-order (lambda (b) (copy (binding-init b))) (let-bindings e)))
             (vars (map-in-order (lambda (b) (fresh x (var-name (binding-var b)))) (let-bindings e)))

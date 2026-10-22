@@ -200,4 +200,17 @@ pub struct Template {
     /// variable.
     pub local_names: Vec<String>,
     pub free_names: Vec<String>,
+    /// Where the code was read (plan/12, T2): `(ip, position)` pairs in
+    /// order of `ip`, each the position (`crate::sources`) of the code from
+    /// that instruction to the next pair's. Empty for code not compiled
+    /// from source read from a file or the REPL.
+    pub lines: Vec<(u32, u64)>,
+}
+
+impl Template {
+    /// The position of the instruction at `ip`, if it is known.
+    pub fn position_at(&self, ip: usize) -> Option<u64> {
+        let after = self.lines.partition_point(|&(at, _)| at as usize <= ip);
+        after.checked_sub(1).map(|i| self.lines[i].1)
+    }
 }

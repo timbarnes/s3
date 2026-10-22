@@ -473,7 +473,7 @@ impl Session {
             Err(e) => return Err(self.compile_failed(e)),
         };
         if self.dis {
-            io::write_stdout(&self.heap, &compile::disasm::disassemble(template));
+            io::write_stdout(&self.heap, &compile::disasm::disassemble(&self.heap, template));
         }
         Ok(template)
     }
@@ -1270,7 +1270,7 @@ mod tests {
         }
         let mut other = bytes.clone();
         other[8] = 99;
-        assert_eq!(fasl::read(&mut s.heap, s.env, &other).unwrap_err(), "compiled file is version 99, and this s3 reads version 2: compile it again");
+        assert_eq!(fasl::read(&mut s.heap, s.env, &other).unwrap_err(), "compiled file is version 99, and this s3 reads version 3: compile it again");
     }
 
     #[test]
@@ -1336,6 +1336,39 @@ mod tests {
         assert_eq!(s.heap.sources.depth(), 0);
         // Code that wasn't read as source has no position.
         assert_eq!(run("(if)"), ["error: if: bad syntax: (if)"]);
+    }
+
+    #[test]
+    fn run_time_errors_have_positions() {
+        let mut s = stressed_session();
+        let src = "(define (g x)\n  (+ 1\n     (car x)))\n\
+                   (define (f x) (list (g x)))\n\
+                   (define (h) (list (undefined-thing 3)))\n\
+                   (define (k) (if (< 'a 1) 1 2))\n\
+                   (f 5)\n(h)\n(k)\n\
+                   (list ((lambda (x)\n  (vector-ref x 9)) (vector)))";
+        let mut port = io::new_string_port_input(src);
+        let mut errors = Vec::new();
+        while let Some(result) = s.compile_next(&mut port, "t.scm") {
+            if let Err(e) = result.and_then(|t| s.run_form(t)) {
+                errors.push(format!("{} / {}", e, s.vm.backtrace.join(" / ")));
+            }
+        }
+        assert_eq!(errors, [
+            // Each frame is at the call it made, the innermost at the error.
+            // A top-level form that tail-calls leaves no frame.
+            "car: expected a pair, got 5 / g (t.scm:3) / f (t.scm:4)",
+            "unbound variable: undefined-thing / h (t.scm:5)",
+            // A test fused into a jump.
+            "<: expected a number, got a / k (t.scm:6)",
+            "vector-ref: index 9 out of range for length 0 / a lambda (t.scm:11) / the top level (t.scm:10)",
+        ]);
+        // The positions survive a compiled file.
+        let compiled = run_compiled("(define (g x)\n  (car x))", "(list (g 1))").unwrap();
+        assert_eq!(compiled, ["error: car: expected a pair, got 1"]);
+        // dis shows them.
+        let template = s.compile_next(&mut io::new_string_port_input("(define (g)\n  (car 1))"), "t.scm").unwrap().unwrap();
+        assert!(compile::disasm::disassemble(&s.heap, template).contains("template g  arity 0\n      ; t.scm:2\n"));
     }
 
     #[test]

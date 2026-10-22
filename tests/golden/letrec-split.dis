@@ -17,11 +17,13 @@ template scale  arity 1
   11  MakeClosure k1   ; #<template all>
   12  LocalSet 4       ; all
   13  PatchFree 4 1 4  ; all.1 = all
+      ; letrec-split.scm:10
   14  LocalRef 4       ; all
   15  LocalRef 0       ; xs
   16  TailCall 1
 template one  arity 1  free 2
    0  FreeRef 0        ; count
+      ; letrec-split.scm:8
    1  FreeRef 0        ; count
    2  BoxRef
    3  AddImm 1
@@ -33,6 +35,7 @@ template one  arity 1  free 2
    9  Mul
   10  Return
 template all  arity 1  free 2
+      ; letrec-split.scm:9
    0  LocalRef 0       ; xs
    1  JumpIfNot NullP →4
    2  Nil

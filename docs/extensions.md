@@ -21,13 +21,16 @@ What s3 provides beyond R7RS-small. It is deliberately little: s3 is a small, st
 
 ## Debugging
 
-When an error isn't handled, s3 prints the names of the procedures that were waiting for a value, innermost first:
+When an error isn't handled, s3 prints the procedures that were waiting for a value, innermost first. For code read from a file or typed at the REPL, each says where it was: the innermost where the error happened, the others where they made the call that's waiting:
 
 ```
 error: unbound variable: h
-  in g
-  in f
+  in g (prog.scm:7)
+  in f (prog.scm:3)
+  in the top level (prog.scm:12)
 ```
+
+A procedure that ended with a tail call has no frame left to show. An anonymous procedure is shown as `a lambda`, and only if its place is known. `dis` shows the places too, as `; file:line` before the first instruction from each.
 
 An error found while compiling code read from a file, or typed at the REPL, says where the form it is in was read. For a form a macro produced, that's where the macro was used:
 

@@ -50,7 +50,7 @@ fn error_object(v: Value, who: &str) -> Result<(ErrorKind, Value, Value), Error>
 
 /// `(%abort obj)`: `raise` found no handler. End the top-level form with
 /// `obj` as its error, recording the backtrace first.
-fn abort(vm: &mut Vm, _: &mut Heap, args: &[Value]) -> Result<Value, Error> {
-    vm.record_backtrace();
+fn abort(vm: &mut Vm, heap: &mut Heap, args: &[Value]) -> Result<Value, Error> {
+    vm.record_backtrace(heap);
     Err(Error { kind: ErrorKind::Uncaught, message: uncaught_message(args[0]), irritants: Vec::new() })
 }

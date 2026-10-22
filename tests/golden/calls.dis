@@ -1,9 +1,11 @@
 template top-level
+      ; calls.scm:2
    0  Fixnum 6
    1  Fixnum 7
    2  Mul
    3  Return
 template top-level
+      ; calls.scm:3
    0  Fixnum 2
    1  Fixnum 3
    2  Mul

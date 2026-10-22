@@ -1,4 +1,5 @@
 template top-level
+      ; begin.scm:2
    0  GlobalRef k0     ; display
    1  Const k1         ; "a"
    2  Call 1

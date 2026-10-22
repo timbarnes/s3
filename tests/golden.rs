@@ -16,7 +16,9 @@ fn golden_disassembly() {
     let mut paths: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).collect();
     paths.sort();
     for scm in paths.iter().filter(|p| p.extension().is_some_and(|e| e == "scm")) {
-        let out = Command::new(env!("CARGO_BIN_EXE_s3")).arg("--dis").arg(scm).output().unwrap();
+        // Run in the directory, so the listings' positions name the file
+        // as NAME.scm wherever the repository is.
+        let out = Command::new(env!("CARGO_BIN_EXE_s3")).current_dir(&dir).arg("--dis").arg(scm.file_name().unwrap()).output().unwrap();
         let actual = String::from_utf8_lossy(&out.stdout).into_owned()
             + &String::from_utf8_lossy(&out.stderr);
         let expected_path = scm.with_extension("dis");

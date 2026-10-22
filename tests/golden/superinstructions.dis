@@ -3,8 +3,10 @@ template top-level
    1  GlobalDefine k1  ; walk
    2  Return
 template walk  arity 2
+      ; superinstructions.scm:5
    0  LocalRef 0       ; l
    1  JumpIfNot NullP →10
+      ; superinstructions.scm:7
    2  LocalRef 1       ; n
    3  Fixnum 100000
    4  JumpIfNot Ge →7
@@ -13,6 +15,7 @@ template walk  arity 2
    7  LocalRef 1       ; n
    8  SubImm 3
    9  Return
+      ; superinstructions.scm:6
   10  GlobalRef k0     ; walk
   11  CdrLocal 0       ; l
   12  LocalRef 1       ; n
@@ -25,12 +28,14 @@ template top-level
 template boxed  arity 1
    0  MakeBox 0        ; l
    1  LocalRef 0       ; l
+      ; superinstructions.scm:9
    2  LocalRef 0       ; l
    3  BoxRef
    4  Cdr
    5  BoxSet
    6  Unspecified
    7  Pop
+      ; superinstructions.scm:10
    8  LocalRef 0       ; l
    9  BoxRef
   10  Car
@@ -40,6 +45,7 @@ template top-level
    1  GlobalDefine k1  ; big
    2  Return
 template big  arity 1
+      ; superinstructions.scm:11
    0  LocalRef 0       ; n
    1  Fixnum 100000
    2  JumpIfNot Lt →7

@@ -18,7 +18,8 @@
 ;; lives. An inner lambda gets a new gen (lambda-template) that shares
 ;; `boxed` and `frees` with its parent.
 (define-record-type gen
-  (make-gen boxed frees code consts const-index depth locs names local-names free-names self-var next-self params)
+  (make-gen boxed frees code consts const-index depth locs names local-names free-names self-var next-self params
+            lines position recorded)
   gen?
   ;; Shared by a form's procedures: its boxed variables, and the memo of
   ;; its lambdas' free variables (free-variables).
@@ -42,12 +43,22 @@
   (self-var gen-self-var set-gen-self-var!)
   ;; While compiling a lambda group's init: the variable it is bound to.
   (next-self gen-next-self set-gen-next-self!)
-  (params gen-params set-gen-params!))
+  (params gen-params set-gen-params!)
+  ;; The line table (plan/12, T2): ip, position, ip, position ..., each
+  ;; ip the first of the instructions compiled at that position.
+  ;; `position` is that of the innermost node being compiled that has
+  ;; one, or #f; `recorded` is the last one added to the table. Code
+  ;; outside every node with a position (a top-level begin's pops, say)
+  ;; can't raise an error, so it needn't be recorded as unknown.
+  (lines gen-lines)
+  (position gen-position set-gen-position!)
+  (recorded gen-recorded set-gen-recorded!))
 
 ;; A gen for a new procedure, sharing the form's boxed variables and
 ;; free-variable memo; everything else starts empty.
 (define (new-gen boxed frees)
-  (make-gen boxed frees (make-buffer) (make-buffer) '() 0 '() '() (make-buffer) (make-buffer) #f #f 0))
+  (make-gen boxed frees (make-buffer) (make-buffer) '() 0 '() '() (make-buffer) (make-buffer) #f #f 0
+            (make-buffer) #f #f))
 
 ;; Compile a top-level form into a template of no arguments.
 (define (codegen e)
@@ -70,7 +81,8 @@
                     (buffer->vector (gen-code g))
                     (buffer->vector (gen-consts g))
                     (list->vector slot-names)
-                    (buffer->vector (gen-free-names g)))))
+                    (buffer->vector (gen-free-names g))
+                    (buffer->vector (gen-lines g)))))
 
 ;; Record that the code just emitted pushed `n` values (popped, if
 ;; negative). Every emit is followed by one, so the depth is always the
@@ -85,8 +97,31 @@
                 (set-gen-const-index! g (cons (cons v i) (gen-const-index g)))
                 i))))
 
-;; Emit an instruction; its index.
-(define (emit g . instruction) (buffer-push! (gen-code g) instruction))
+;; Emit an instruction; its index. If the position has changed since the
+;; last one recorded, the line table records it.
+(define (emit g . instruction)
+  (let ((position (gen-position g)))
+    (if (and position (not (eqv? position (gen-recorded g))))
+        (begin (buffer-push! (gen-lines g) (buffer-count (gen-code g)))
+               (buffer-push! (gen-lines g) position)
+               (set-gen-recorded! g position))))
+  (buffer-push! (gen-code g) instruction))
+
+;; Make the call or global-ref `e`'s position, if it has one, the current
+;; one; the outer one, to put back when `e` is compiled.
+(define (enter-position g e)
+  (let ((outer (gen-position g)) (position (node-position e)))
+    (if position (set-gen-position! g position))
+    outer))
+
+;; Run `thunk`, which compiles the node `e`, at `e`'s position if it has
+;; one; its value.
+(define (at-position g e thunk)
+  (if (memq (node-tag e) '(call global-ref))
+      (let* ((outer (enter-position g e)) (result (thunk)))
+        (set-gen-position! g outer)
+        result)
+      (thunk)))
 
 ;; Point the jump at `at` to the next instruction to be emitted.
 (define (patch g at)
@@ -159,7 +194,9 @@
      (depth+! g -1)
      (unspecified g tail?))
     ((global-ref)
-     (emit g 'global-ref (constant g (global-cell e)))
+     (let ((outer (enter-position g e)))
+       (emit g 'global-ref (constant g (global-cell e)))
+       (set-gen-position! g outer))
      (depth+! g 1)
      (ret g tail?))
     ((global-define)
@@ -184,7 +221,10 @@
          (emit g 'make-closure (constant g t))
          (depth+! g (- 1 (length free)))
          (ret g tail?))))
-    ((call) (call-expr g e tail?))
+    ((call)
+     (let ((outer (enter-position g e)))
+       (call-expr g e tail?)
+       (set-gen-position! g outer)))
     ((let)
      (let ((base (gen-depth g)) (bindings (let-bindings e)))
        (for-each (lambda (b) (gen-expr g (binding-init b) #f)) bindings)
@@ -236,19 +276,23 @@
                                 (eq? (node-tag (cadr args)) 'const)
                                 (small? (const-value (cadr args)) -32768 32767)
                                 (list t (car args) (const-value (cadr args)))))))
+               ;; A fused test is compiled at the test's position.
                (to-else
-                (cond (imm
-                       (gen-expr g (cadr imm) #f)
-                       (depth+! g -1)
-                       (emit g 'jump-if-not-imm (car imm) (caddr imm) 0))
-                      (fused
-                       (for-each (lambda (a) (gen-expr g a #f)) (cdr fused))
-                       (depth+! g (- (length (cdr fused))))
-                       (emit g 'jump-if-not (car fused) 0))
-                      (else
-                       (gen-expr g test #f)
-                       (depth+! g -1)
-                       (emit g 'jump-if-false 0))))
+                (at-position
+                 g test
+                 (lambda ()
+                   (cond (imm
+                          (gen-expr g (cadr imm) #f)
+                          (depth+! g -1)
+                          (emit g 'jump-if-not-imm (car imm) (caddr imm) 0))
+                         (fused
+                          (for-each (lambda (a) (gen-expr g a #f)) (cdr fused))
+                          (depth+! g (- (length (cdr fused))))
+                          (emit g 'jump-if-not (car fused) 0))
+                         (else
+                          (gen-expr g test #f)
+                          (depth+! g -1)
+                          (emit g 'jump-if-false 0))))))
                (depth (gen-depth g)))
           (gen-expr g then tail?)
           (set-gen-depth! g depth)

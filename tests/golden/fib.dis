@@ -3,6 +3,7 @@ template top-level
    1  GlobalDefine k1  ; fib
    2  Return
 template fib  arity 1
+      ; fib.scm:3
    0  LocalRef 0       ; n
    1  JumpIfNotImm Lt 2 →4
    2  LocalRef 0       ; n

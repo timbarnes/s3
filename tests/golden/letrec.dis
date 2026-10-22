@@ -12,10 +12,12 @@ template parity  arity 1
    6  MakeClosure k1   ; #<template odd?>
    7  LocalSet 2       ; odd?
    8  PatchFree 1 0 2  ; even?.0 = odd?
+      ; letrec.scm:7
    9  LocalRef 1       ; even?
   10  LocalRef 0       ; n
   11  TailCall 1
 template even?  arity 1  free 1
+      ; letrec.scm:5
    0  LocalRef 0       ; n
    1  JumpIfNotImm NumEq 0 →4
    2  True
@@ -25,6 +27,7 @@ template even?  arity 1  free 1
    6  SubImm 1
    7  TailCall 1
 template odd?  arity 1  free 1
+      ; letrec.scm:6
    0  LocalRef 0       ; n
    1  JumpIfNotImm NumEq 0 →4
    2  False
@@ -38,6 +41,7 @@ template top-level
    1  GlobalDefine k1  ; count-to
    2  Return
 template count-to  arity 1
+      ; letrec.scm:9
    0  Undefined
    1  LocalRef 0       ; n
    2  LocalRef 1       ; loop
@@ -49,6 +53,7 @@ template count-to  arity 1
    8  Fixnum 0
    9  TailCall 1
 template loop  arity 1  free 2
+      ; letrec.scm:9
    0  LocalRef 0       ; i
    1  FreeRef 0        ; n
    2  JumpIfNot NumEq →5

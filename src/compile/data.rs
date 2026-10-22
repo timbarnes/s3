@@ -183,6 +183,7 @@ pub struct TemplateFields {
     pub consts: Vec<Value>,
     pub local_names: Vec<String>,
     pub free_names: Vec<String>,
+    pub lines: Vec<(u32, u64)>,
 }
 
 /// Make the template `f` describes, if it passes the verifier.
@@ -196,6 +197,7 @@ pub fn make_template(heap: &mut Heap, f: TemplateFields) -> Result<GcRef, String
         consts: f.consts,
         local_names: f.local_names,
         free_names: f.free_names,
+        lines: f.lines,
     };
     verify(&t).map_err(|e| format!("%make-template: {}", e))?;
     Ok(heap.template(t))
@@ -227,7 +229,28 @@ fn template_fields(a: &[Value]) -> Result<TemplateFields, Error> {
         consts: vector_items(a[5], "the constants")?,
         local_names: names(a[6], "the local names")?,
         free_names: names(a[7], "the free-variable names")?,
+        lines: match a.get(8) {
+            Some(&v) => line_table(v)?,
+            None => Vec::new(),
+        },
     })
+}
+
+/// A line table, given as #(ip position ...) in order of ip.
+fn line_table(v: Value) -> Result<Vec<(u32, u64)>, Error> {
+    let items = vector_items(v, "the line table")?;
+    let bad = || err!("%make-template: bad line table: {}", print_value(v));
+    let mut lines: Vec<(u32, u64)> = Vec::with_capacity(items.len() / 2);
+    for pair in items.chunks(2) {
+        let [ip, position] = pair else { return Err(bad()) };
+        let ip = ip.as_fixnum().and_then(|n| u32::try_from(n).ok()).ok_or_else(bad)?;
+        let position = position.as_fixnum().and_then(|n| u64::try_from(n).ok()).ok_or_else(bad)?;
+        if lines.last().is_some_and(|&(last, _)| last >= ip) {
+            return Err(bad());
+        }
+        lines.push((ip, position));
+    }
+    Ok(lines)
 }
 
 /// The inlined instruction for a call to the global `cell` with `argc`
@@ -247,8 +270,8 @@ pub fn inline_op(heap: &Heap, cell: GcRef, argc: usize) -> Option<Op> {
 
 pub static PRIMITIVES: &[Primitive] = &[
     // (%make-template name required rest? nfree #(instruction ...) #(constant ...)
-    //                 #(local-name ...) #(free-name ...))
-    prim("%make-template", 8, Some(8), |h, a| {
+    //                 #(local-name ...) #(free-name ...) [#(ip position ...)])
+    prim("%make-template", 8, Some(9), |h, a| {
         let fields = template_fields(a)?;
         Ok(Value::obj(make_template(h, fields)?))
     }),
@@ -265,7 +288,7 @@ pub static PRIMITIVES: &[Primitive] = &[
     // (%disassemble t): print a template's code, as dis does.
     prim("%disassemble", 1, Some(1), |h, a| match kind(a[0]) {
         Some(Obj::Template(_)) => {
-            crate::io::write_stdout(h, &crate::compile::disasm::disassemble(a[0].as_ref().unwrap()));
+            crate::io::write_stdout(h, &crate::compile::disasm::disassemble(h, a[0].as_ref().unwrap()));
             Ok(Value::UNSPECIFIED)
         }
         _ => Err(err!("%disassemble: not a template: {}", print_value(a[0]))),
