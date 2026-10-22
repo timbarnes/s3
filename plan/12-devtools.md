@@ -4,7 +4,7 @@ Written 2026-10-22, for review before any code. It comes before native
 code (10), which is ready to start now that the memory work (11, G0-G3)
 is done.
 
-**Status:** T1-T3 done 2026-10-22. Before it, a string before a body's
+**Status:** T1-T4 done 2026-10-22. Before it, a string before a body's
 internal definitions was made a docstring, dropped for now
 (`body-in-frame`, `scheme/compiler/expand.scm`); T3 stores it.
 
@@ -375,6 +375,29 @@ hook in native code. Leave it until the wrapper falls short.
 
 **Tests:** the output above, `untrace` restoring the original procedure,
 and tracing a procedure that raises an error (the depth must reset).
+
+### T4 results (2026-10-22)
+
+As planned, in `core.scm`, about 80 lines with comments:
+
+- `trace` rebinds the global by `eval`ing a `set!` in the interaction
+  environment. An imported procedure can't be assigned, so tracing one
+  is an error that says so (`trace: an imported procedure can't be
+  traced: car`).
+- The depth is set by a `dynamic-wind` around the call, so an error or
+  an escape puts it back, as the plan asked.
+- `untrace` restores the original only if the global still holds the
+  tracer. A procedure defined again since it was traced keeps its new
+  definition.
+- The output goes to the current error port, as s1's tracer's did, so
+  it stays apart from the program's output.
+- **Not as the plan expected:** a traced loop doesn't run out of stack.
+  Frames are on the heap, and a 3,000,000-deep traced loop finished. The
+  danger was the output instead. Indentation grows with depth, so it
+  grew quadratically. It stops at 20 levels, and the depth is shown as
+  a number after that (`[823] (loop 2999177)`).
+- The backtrace of an error inside a traced procedure shows the
+  tracer's `call-with-values` frames. That's left as it is.
 
 ## Decisions
 

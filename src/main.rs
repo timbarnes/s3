@@ -1222,6 +1222,20 @@ mod tests {
         assert!(compiled[0].starts_with("\"(sq x)\\n  The square of x.\\n  Defined at /"), "{}", compiled[0]);
     }
 
+    #[test]
+    fn trace() {
+        let traced = |body: &str| format!(
+            "(let ((port (open-output-string))) (parameterize ((current-error-port port)) (guard (e (#t #f)) {})) (get-output-string port))",
+            body);
+        check(&format!("(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (define original fact) (trace 'fact) {}                         (untrace 'fact) (eq? fact original) {}",
+                       traced("(fact 2)"), traced("(fact 2)")),
+              &["fact", "original", "", "\"(fact 2)\\n  (fact 1)\\n    (fact 0)\\n    => 1\\n  => 1\\n=> 2\\n\"", "", "#t", "\"\""]);
+        // An error leaves the depth where it was.
+        check(&format!("(define (bad x) (car x)) (define (f) 1) (trace 'bad 'f) {} {} (untrace) (trace 'car)",
+                       traced("(bad 1)"), traced("(f)")),
+              &["bad", "f", "", "\"(bad 1)\\n\"", "\"(f)\\n=> 1\\n\"", "", "error: trace: an imported procedure can't be traced: car"]);
+    }
+
     /// Guards nested 8,000 deep, returning normally and re-raising through
     /// every level, make no full continuation captures (each guard costs
     /// constant time; with the reference implementation each would copy

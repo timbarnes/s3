@@ -448,6 +448,83 @@
 (define (apropos text)
   (for-each (lambda (name) (write name) (newline)) (%apropos text)))
 
+;;; Tracing (plan/12, T4): s3 extensions. (trace 'f) rebinds the global
+;;; f, in the interaction environment, to a procedure that shows each call
+;;; and its result on the current error port, indented by depth, and calls
+;;; the original. Only calls through the global are traced: not those the
+;;; compiler inlined or made into loops, and not imported procedures,
+;;; which can't be assigned. A traced procedure's tail calls aren't tail
+;;; calls any more.
+
+;; The traced names, with their originals and tracers: ((name original
+;; . tracer) ...).
+(define %traced '())
+
+;; The calls traced procedures are inside: the indentation.
+(define %trace-depth 0)
+
+(define (%trace-global name)
+  (eval name (interaction-environment)))
+
+(define (%trace-set! name value)
+  (eval (list 'set! name (list 'quote value)) (interaction-environment)))
+
+;; Show `items` on the current error port at `depth`: `prefix` and then
+;; each item, written. The indentation stops growing 20 calls deep, after
+;; which the depth is shown as a number.
+(define (%trace-show depth prefix items)
+  (let ((port (current-error-port)))
+    (write-string (make-string (* 2 (min depth 20)) #\space) port)
+    (if (> depth 20) (begin (write-string "[" port) (write depth port) (write-string "] " port)))
+    (write-string prefix port)
+    (let loop ((items items) (sep ""))
+      (if (pair? items)
+          (begin (write-string sep port) (write (car items) port) (loop (cdr items) " "))))
+    (newline port)))
+
+;; A procedure that traces calls to `proc` as calls to `name`. The depth
+;; goes back down however the call is left, by an error or an escape.
+(define (%tracer name proc)
+  (lambda args
+    (let ((depth %trace-depth))
+      (%trace-show depth "" (list (cons name args)))
+      (call-with-values
+          (lambda ()
+            (dynamic-wind (lambda () (set! %trace-depth (+ depth 1)))
+                          (lambda () (apply proc args))
+                          (lambda () (set! %trace-depth depth))))
+        (lambda results
+          (%trace-show depth "=> " results)
+          (apply values results))))))
+
+;; (trace 'name ...): trace calls to the procedures those globals hold.
+(define (trace . names)
+  (for-each (lambda (name)
+              (if (not (symbol? name)) (error "trace: not a name:" name))
+              (if (not (assq name %traced))
+                  (let ((proc (%trace-global name)))
+                    (if (not (procedure? proc)) (error "trace: not a procedure:" name))
+                    (let ((tracer (%tracer name proc)))
+                      (guard (e (#t (error "trace: an imported procedure can't be traced:" name)))
+                        (%trace-set! name tracer))
+                      (set! %traced (cons (cons name (cons proc tracer)) %traced))))))
+            names))
+
+;; (untrace 'name ...) puts the original procedures back, and (untrace)
+;; all of them. A name defined again since it was traced keeps its new
+;; value.
+(define (untrace . names)
+  (for-each (lambda (name)
+              (let ((entry (assq name %traced)))
+                (if entry
+                    (begin
+                      (if (eq? (%trace-global name) (cddr entry)) (%trace-set! name (cadr entry)))
+                      (set! %traced (let remove ((ts %traced))
+                                      (cond ((null? ts) '())
+                                            ((eq? (car ts) entry) (cdr ts))
+                                            (else (cons (car ts) (remove (cdr ts)))))))))))
+            (if (null? names) (map car %traced) names)))
+
 ;; exit runs the after thunks of every dynamic-wind it is inside, then
 ;; ends the process; emergency-exit doesn't.
 (define (exit . status)

@@ -15,6 +15,7 @@ What s3 provides beyond R7RS-small. It is deliberately little: s3 is a small, st
 * `(dis 'datum)`: prints the bytecode `datum` compiles to, without running it. See [Macros](./macros.md#inspecting-expansions).
 * `(help x)`: displays the documentation of `x`, a name or a procedure. For a standard name, that's its entry in this manual, with a link to it. For a procedure of your own, it's its signature, its docstring if it has one, and where it was defined. A docstring is a string at the start of a procedure's body with more forms after it: `(define (sq x) "The square of x." (* x x))`. See [Debugging](#debugging).
 * `(apropos "text")`: displays the names defined at the REPL, or imported there, that contain `text`.
+* `(trace 'name ...)`, `(untrace 'name ...)`: trace calls to the procedures those global variables hold, or stop. `(untrace)` stops them all. See [Debugging](#debugging).
 
 ## Command line
 
@@ -40,7 +41,28 @@ An error found while compiling code read from a file, or typed at the REPL, says
 error: prog.scm:14: define: only allowed at top level or at the start of a body: (define b 2)
 ```
 
-There is no debugger or tracer yet. For a Scheme with those, see [s1](https://github.com/timbarnes/s1), whose debugger and tracer s3 doesn't share.
+`(trace 'name ...)` shows each call to those procedures, and what it returns, on the current error port, indented by depth:
+
+```
+s3> (define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
+s3> (trace 'fact)
+s3> (fact 2)
+(fact 2)
+  (fact 1)
+    (fact 0)
+    => 1
+  => 1
+=> 2
+2
+```
+
+`(untrace 'name ...)` puts the procedures back, and `(untrace)` all of them. Tracing rebinds the global variable, so:
+
+* only calls through the variable are traced. In a program that starts with `import`, the compiler may have inlined calls to a small procedure, and a loop's call to itself never goes through the variable;
+* only the program's own procedures can be traced: imported ones, such as `map`, can't be assigned;
+* a traced procedure's tail calls are no longer tail calls, so a traced loop uses memory for each iteration. Past 20 calls deep, the depth is shown as a number rather than by indentation.
+
+There is no stepping debugger. For a Scheme with those, see [s1](https://github.com/timbarnes/s1), whose debugger and tracer s3 doesn't share.
 
 ## Environment variables
 
